@@ -1,0 +1,12 @@
+package: "com.android.bluetooth.flags"
+container: "com.android.bt"
+
+flag {
+    name: "dont_send_hci_disconnect_repeatedly"
+    namespace: "bluetooth"
+    description: "Prevent BT from sending repeated HCI disconnect command"
+    bug: "381175628"
+    metadata {
+        purpose: PURPOSE_BUGFIX
+    }
+}
