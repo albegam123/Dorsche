@@ -77,11 +77,12 @@
  hci::LeScanningManager* GetScanning();
 --- a/system/gd/sysprops/sysprops_module.cc
 +++ b/system/gd/sysprops/sysprops_module.cc
-@@ -123,6 +123,7 @@
+@@ -123,6 +123,8 @@
            // SCO
            "bluetooth.sco.disable_enhanced_connection",
            "bluetooth.sco.swb_supported",
 +          "bluetooth.hfp.linux_hci_driver_altsetting.enabled",
++          "bluetooth.hfp.linux_hci_driver_msbc_packet_size",
            // Profile
            "bluetooth.hid.wait_ms_after_uhid_open",
            "persist.bluetooth.avrcpcontrolversion",
@@ -95,12 +96,14 @@
  #include "hci/controller_interface.h"
  #include "main/shim/entry.h"
  #include "osi/include/properties.h"
-@@ -83,6 +84,17 @@
+@@ -83,6 +84,19 @@
  
  #define MGMT_POLL_TIMEOUT_MS 2000
  
 +constexpr char kLinuxHciDriverAltsettingProperty[] =
 +        "bluetooth.hfp.linux_hci_driver_altsetting.enabled";
++constexpr char kLinuxHciDriverMsbcPacketSizeProperty[] =
++        "bluetooth.hfp.linux_hci_driver_msbc_packet_size";
 +
 +bool switch_linux_hci_driver_altsetting(uint8_t altsetting) {
 +  // Linux 6.18 HCI_DRV_PKT command header: opcode 0x0401, payload length 1.
@@ -113,7 +116,48 @@
  void cache_codec_capabilities(struct mgmt_rp_get_codec_capabilities* rp) {
    const uint8_t kCodecMsbc = 0x5;
  
-@@ -486,6 +498,18 @@
+@@ -310,6 +324,13 @@
+     return false;
+   }
+
++  // HCI_DRV_PKT selects btusb's transparent isochronous path. Floss owns mSBC
++  // framing in software, so no ChromeOS codec-capability record is required.
++  if (coding_format == ESCO_CODING_FORMAT_TRANSPNT &&
++      osi_property_get_bool(kLinuxHciDriverAltsettingProperty, false)) {
++    return true;
++  }
++
+   for (cached_codec_info c : cached_codecs) {
+     if (c.inner.codec == MSBC_TRANSPARENT && coding_format == ESCO_CODING_FORMAT_TRANSPNT) {
+       return true;
+@@ -331,6 +352,9 @@
+ bool get_swb_supported() {
+ #ifdef TARGET_FLOSS
+   // We only support SWB via transparent mode.
++  if (osi_property_get_bool(kLinuxHciDriverAltsettingProperty, false)) {
++    return false;
++  }
+   return is_coding_format_supported(ESCO_CODING_FORMAT_TRANSPNT);
+ #else
+   return is_coding_format_supported(ESCO_CODING_FORMAT_TRANSPNT) &&
+@@ -447,4 +471,16 @@
+ size_t get_packet_size(int codec) {
++  if (codec == codec::MSBC_TRANSPARENT &&
++      osi_property_get_bool(kLinuxHciDriverAltsettingProperty, false)) {
++    const int32_t packet_size =
++            osi_property_get_int32(kLinuxHciDriverMsbcPacketSizeProperty, kDefaultPacketSize);
++    // The software mSBC framer supports only these divisors. Keep the generic
++    // 60-byte fallback if a deployment supplies an unsafe controller quirk.
++    if (packet_size == 24 || packet_size == 48 || packet_size == 60 || packet_size == 72) {
++      return static_cast<size_t>(packet_size);
++    }
++    bluetooth::log::warn("Ignoring unsupported Linux mSBC packet size {}", packet_size);
++  }
++
+   for (const cached_codec_info& c : cached_codecs) {
+     if (c.inner.codec == static_cast<uint64_t>(codec)) {
+       return c.pkt_size;
+@@ -486,6 +522,18 @@
              "Failed to notify HAL of connection change: hci {}, device {}, "
              "connected {}, codec {}",
              hci, device, is_connected, codec);
@@ -132,3 +176,19 @@
    } else {
      bluetooth::log::info(
              "Notified HAL of connection change: hci {}, device {}, connected {}, "
+
+--- a/system/stack/btm/btm_sco_hci.cc
++++ b/system/stack/btm/btm_sco_hci.cc
+@@ -168,10 +168,10 @@
+  * code ties to limited packet size values. Specifically list them out
+  * to check against when setting packet size. The first entry is the default
+  * value as a fallback. */
+-constexpr size_t btm_wbs_supported_pkt_size[] = {BTM_MSBC_PKT_LEN, 72, 24, 0};
++constexpr size_t btm_wbs_supported_pkt_size[] = {BTM_MSBC_PKT_LEN, 72, 48, 24, 0};
+ /* Buffer size should be set to least common multiple of SCO packet size and
+  * BTM_MSBC_PKT_LEN for optimizing buffer copy. */
+-constexpr size_t btm_wbs_msbc_buffer_size[] = {BTM_MSBC_PKT_LEN, 360, 120, 0};
++constexpr size_t btm_wbs_msbc_buffer_size[] = {BTM_MSBC_PKT_LEN, 360, 240, 120, 0};
+
+ /* The pre-computed SCO packet per HFP 1.7 spec. This mSBC packet will be
+  * decoded into all-zero input PCM. */

@@ -14,13 +14,51 @@ const FLOSS_SERVICE: &str = "org.chromium.bluetooth";
 const MEDIA_PATH: &str = "/org/chromium/bluetooth/hci0/media";
 const SCO_DATA_PATH: &str = "/run/bluetooth/audio/.sco_data";
 
-// Force narrow-band CVSD for the first hardware bring-up. It has an unambiguous
-// 8-kHz/S16LE host contract and exercises btusb isochronous altsetting 2.
-const DISABLE_MSBC_AND_LC3: i32 = 0b110;
-const CVSD_CODEC_BIT: u8 = 0b001;
-const SAMPLE_RATE: usize = 8_000;
 const FRAME_TIME: Duration = Duration::from_millis(10);
-const SAMPLES_PER_FRAME: usize = SAMPLE_RATE / 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Codec {
+    Cvsd,
+    Msbc,
+}
+
+impl Codec {
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "cvsd" => Ok(Self::Cvsd),
+            "msbc" => Ok(Self::Msbc),
+            _ => bail!("--codec must be cvsd or msbc"),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Cvsd => "CVSD",
+            Self::Msbc => "mSBC",
+        }
+    }
+
+    fn sample_rate(self) -> usize {
+        match self {
+            Self::Cvsd => 8_000,
+            Self::Msbc => 16_000,
+        }
+    }
+
+    fn expected_bit(self) -> u8 {
+        match self {
+            Self::Cvsd => 0b001,
+            Self::Msbc => 0b010,
+        }
+    }
+
+    fn disabled_codecs(self) -> i32 {
+        match self {
+            Self::Cvsd => 0b110,
+            Self::Msbc => 0b101,
+        }
+    }
+}
 
 #[zbus::proxy(
     interface = "org.chromium.bluetooth.BluetoothMedia",
@@ -54,6 +92,7 @@ struct Args {
     frequency_hz: f32,
     loopback: bool,
     loopback_gain: f32,
+    codec: Codec,
 }
 
 impl Args {
@@ -65,6 +104,7 @@ impl Args {
             frequency_hz: 440.0,
             loopback: false,
             loopback_gain: 0.35,
+            codec: Codec::Cvsd,
         };
 
         while let Some(arg) = args.next() {
@@ -77,10 +117,11 @@ impl Args {
                 "--loopback-gain" => {
                     parsed.loopback_gain = args.next().ok_or_else(value)?.parse()?
                 }
+                "--codec" => parsed.codec = Codec::parse(&args.next().ok_or_else(value)?)?,
                 "-h" | "--help" => {
                     println!(
                         "Usage: floss_hfp_smoke --address XX:XX:XX:XX:XX:XX \
-                         [--seconds 5] [--frequency 440] \
+                         [--seconds 5] [--codec cvsd|msbc] [--frequency 440] \
                          [--loopback [--loopback-gain 0.35]]"
                     );
                     std::process::exit(0);
@@ -165,9 +206,11 @@ async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, C
     let (mut reader, mut writer) = stream.into_split();
     let duration = Duration::from_secs(args.seconds);
     let frequency_hz = args.frequency_hz;
+    let sample_rate = args.codec.sample_rate();
 
     let playback = async move {
-        let mut pcm = vec![0_u8; SAMPLES_PER_FRAME * size_of::<i16>()];
+        let samples_per_frame = sample_rate / 100;
+        let mut pcm = vec![0_u8; samples_per_frame * size_of::<i16>()];
         let amplitude = i16::MAX as f32 * 10_f32.powf(-36.0 / 20.0);
         let ticks = duration.as_millis() as usize / FRAME_TIME.as_millis() as usize;
         let mut sample_index = 0_u64;
@@ -179,10 +222,10 @@ async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, C
             ticker.tick().await;
             for (index, sample) in pcm.chunks_exact_mut(2).enumerate() {
                 let phase =
-                    TAU * frequency_hz * (sample_index + index as u64) as f32 / SAMPLE_RATE as f32;
+                    TAU * frequency_hz * (sample_index + index as u64) as f32 / sample_rate as f32;
                 sample.copy_from_slice(&((amplitude * phase.sin()) as i16).to_le_bytes());
             }
-            sample_index += SAMPLES_PER_FRAME as u64;
+            sample_index += samples_per_frame as u64;
             writer
                 .write_all(&pcm)
                 .await
@@ -309,7 +352,7 @@ async fn main() -> Result<()> {
         .start_sco_call(
             &args.address,
             false,
-            DISABLE_MSBC_AND_LC3,
+            args.codec.disabled_codecs(),
             Fd::from(start_tx.as_fd()),
         )
         .await?
@@ -322,11 +365,17 @@ async fn main() -> Result<()> {
     let test_result = async {
         let codec = wait_for_listener(&mut start_rx, "SCO start").await?;
         let reported = media.get_hfp_audio_final_codecs(&args.address).await?;
-        if codec != CVSD_CODEC_BIT || reported != CVSD_CODEC_BIT {
-            bail!("expected CVSD codec bit 1, listener={codec}, reported={reported}");
+        let expected = args.codec.expected_bit();
+        if codec != expected || reported != expected {
+            bail!(
+                "expected {} codec bit {expected}, listener={codec}, reported={reported}",
+                args.codec.name()
+            );
         }
         println!(
-            "SCO started: CVSD 8000 Hz/S16LE/mono, mode={}",
+            "SCO started: {} {} Hz/S16LE/mono, mode={}",
+            args.codec.name(),
+            args.codec.sample_rate(),
             if args.loopback { "mic-loopback" } else { "reference-tone" }
         );
 

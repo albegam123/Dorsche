@@ -130,3 +130,39 @@ cargo run --bin floss_hfp_smoke -- \
 `--loopback-gain` accepts `(0.0, 1.0]`; start with the default `0.35`. The live
 path uses a bounded Tokio channel and transfers frame ownership between the SCO
 uplink/downlink tasks without an audio-path mutex.
+
+Once CVSD is stable, select wide-band 16-kHz mSBC explicitly:
+
+```bash
+cargo run --bin floss_hfp_smoke -- \
+  --address F0:BE:25:79:62:A4 --seconds 10 --codec msbc --loopback
+```
+
+On the Linux 6.18 btusb driver-command path, CVSD uses USB altsetting 2 and
+transparent mSBC uses altsetting 1; both must return to altsetting 0 on stop.
+Controllers that expose 48-byte HCI SCO packets, such as the tested CSR
+`0a12:0001`, also need this controller-specific setting in
+`/var/lib/bluetooth/sysprops.conf`:
+
+```ini
+[Sysprops]
+bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
+bluetooth.hfp.linux_hci_driver_msbc_packet_size=48
+```
+
+Do not apply the 48-byte override globally: the overlay accepts only the mSBC
+framer's supported 24/48/60/72-byte sizes and otherwise retains the upstream
+60-byte default. On Linux 6.18, btusb may log one `EMSGSIZE (90)` while changing
+back to altsetting 0 because the driver does not cancel its SCO TX anchor before
+`usb_set_interface`; this occurs after the full-duplex stream has completed and
+is distinct from a packet-size mismatch or kernel oops.
+
+### Floss dependency policy
+
+Dorsche keeps the complete Floss Bluetooth protocol/profile implementation,
+but its host overlay removes the unused `grpcio` dependency from `bt_topshim`.
+No Floss Rust source references that crate; removing it changes neither the
+topshim ABI nor HCI, Classic, LE, A2DP, AVRCP, HFP, HID, GATT, PAN, or LE Audio
+support. D-Bus remains the control plane. Upstream Pandora/PTS sources stay in
+the pristine import because their optional test harnesses may use gRPC, but
+they are not linked into `btadapterd` or the Dorsche runtime.
