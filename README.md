@@ -118,3 +118,15 @@ The HFP test initially forces CVSD so the host PCM contract is deterministic
 (8-kHz/S16LE/mono). It concurrently sends a quiet reference tone and consumes
 microphone PCM, reports byte counts/RMS/peak, and always requests `StopScoCall`
 after an accepted start—even when the data-plane test times out or fails.
+
+For an audible end-to-end microphone check, echo uplink PCM back to the headset
+at a feedback-safe default gain:
+
+```bash
+cargo run --bin floss_hfp_smoke -- \
+  --address F0:BE:25:79:62:A4 --seconds 10 --loopback
+```
+
+`--loopback-gain` accepts `(0.0, 1.0]`; start with the default `0.35`. The live
+path uses a bounded Tokio channel and transfers frame ownership between the SCO
+uplink/downlink tasks without an audio-path mutex.

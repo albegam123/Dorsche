@@ -145,6 +145,9 @@ Observed hardware results:
 - the btusb audio interface transitioned `bAlternateSetting 0 -> 2 -> 0`;
 - the repeat trace observed altsetting 2 approximately 413 ms after test start
   and restoration to zero approximately 32 ms after the two-second stream;
+- a 12-second live microphone loopback sent and captured exactly 191,808 bytes
+  through a bounded Rust channel (`RMS=999.7`, `peak=19715`) while preserving
+  the same `0 -> 2 -> 0` USB transition;
 - `StopScoCall` acknowledged cleanly, `btadapterd` remained active, and no
   kernel oops was observed.
 

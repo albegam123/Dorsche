@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
+use tokio::sync::mpsc;
 use tokio::time::{Instant, MissedTickBehavior, interval_at, timeout};
 use zbus::zvariant::Fd;
 
@@ -51,6 +52,8 @@ struct Args {
     address: String,
     seconds: u64,
     frequency_hz: f32,
+    loopback: bool,
+    loopback_gain: f32,
 }
 
 impl Args {
@@ -60,6 +63,8 @@ impl Args {
             address: String::new(),
             seconds: 5,
             frequency_hz: 440.0,
+            loopback: false,
+            loopback_gain: 0.35,
         };
 
         while let Some(arg) = args.next() {
@@ -68,10 +73,15 @@ impl Args {
                 "--address" => parsed.address = args.next().ok_or_else(value)?,
                 "--seconds" => parsed.seconds = args.next().ok_or_else(value)?.parse()?,
                 "--frequency" => parsed.frequency_hz = args.next().ok_or_else(value)?.parse()?,
+                "--loopback" => parsed.loopback = true,
+                "--loopback-gain" => {
+                    parsed.loopback_gain = args.next().ok_or_else(value)?.parse()?
+                }
                 "-h" | "--help" => {
                     println!(
                         "Usage: floss_hfp_smoke --address XX:XX:XX:XX:XX:XX \
-                         [--seconds 5] [--frequency 440]"
+                         [--seconds 5] [--frequency 440] \
+                         [--loopback [--loopback-gain 0.35]]"
                     );
                     std::process::exit(0);
                 }
@@ -84,6 +94,12 @@ impl Args {
         }
         if parsed.seconds == 0 || !parsed.frequency_hz.is_finite() || parsed.frequency_hz <= 0.0 {
             bail!("duration and frequency must be positive");
+        }
+        if !parsed.loopback_gain.is_finite()
+            || parsed.loopback_gain <= 0.0
+            || parsed.loopback_gain > 1.0
+        {
+            bail!("--loopback-gain must be in (0.0, 1.0]");
         }
         Ok(parsed)
     }
@@ -201,6 +217,71 @@ async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, C
     tokio::try_join!(playback, capture)
 }
 
+async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, CaptureStats)> {
+    let (mut reader, mut writer) = stream.into_split();
+    let deadline = Instant::now() + Duration::from_secs(args.seconds);
+    let gain = args.loopback_gain;
+    // Eight small SCO reads bound latency and memory. If downlink ever stalls,
+    // backpressure reaches capture instead of growing an unbounded audio queue.
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(8);
+
+    let capture = async move {
+        let mut stats = CaptureStats::default();
+        let mut buffer = [0_u8; 640];
+        loop {
+            let read = tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => break,
+                result = reader.read(&mut buffer) => {
+                    result.context("read SCO microphone PCM")?
+                }
+            };
+            if read == 0 {
+                break;
+            }
+            stats.account(&buffer[..read]);
+            // Ownership, rather than a shared mutable buffer, crosses from the
+            // uplink task to the downlink task. No lock is on the audio path.
+            let frame = buffer[..read].to_vec();
+            tokio::select! {
+                _ = tokio::time::sleep_until(deadline) => break,
+                result = tx.send(frame) => {
+                    if result.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(stats)
+    };
+
+    let playback = async move {
+        let mut bytes = 0_u64;
+        while let Some(mut frame) = rx.recv().await {
+            // Attenuate before echoing microphone PCM. Acoustic leakage plus a
+            // unity-gain software loop can otherwise become a positive-feedback
+            // oscillator even when the Bluetooth transport itself is healthy.
+            for sample in frame.chunks_exact_mut(2) {
+                let input = i16::from_le_bytes([sample[0], sample[1]]);
+                let output = (f32::from(input) * gain)
+                    .round()
+                    .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
+                    as i16;
+                sample.copy_from_slice(&output.to_le_bytes());
+            }
+            writer
+                .write_all(&frame)
+                .await
+                .context("echo SCO microphone PCM to headset")?;
+            bytes += frame.len() as u64;
+        }
+        writer.shutdown().await.context("close SCO loopback half")?;
+        Ok::<_, anyhow::Error>(bytes)
+    };
+
+    let (captured, played) = tokio::try_join!(capture, playback)?;
+    Ok((played, captured))
+}
+
 async fn stop_sco(media: &BluetoothMediaProxy<'_>, address: &str) -> Result<u8> {
     let (mut stop_rx, stop_tx) = listener_pair()?;
     media
@@ -244,12 +325,21 @@ async fn main() -> Result<()> {
         if codec != CVSD_CODEC_BIT || reported != CVSD_CODEC_BIT {
             bail!("expected CVSD codec bit 1, listener={codec}, reported={reported}");
         }
-        println!("SCO started: CVSD 8000 Hz/S16LE/mono");
+        println!(
+            "SCO started: CVSD 8000 Hz/S16LE/mono, mode={}",
+            if args.loopback { "mic-loopback" } else { "reference-tone" }
+        );
 
         let data = connect_sco_uipc().await?;
         let (played, captured) = timeout(
             Duration::from_secs(args.seconds + 5),
-            exercise_full_duplex(data, &args),
+            async {
+                if args.loopback {
+                    exercise_loopback(data, &args).await
+                } else {
+                    exercise_full_duplex(data, &args).await
+                }
+            },
         )
         .await
         .context("full-duplex SCO test timed out")??;
