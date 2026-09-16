@@ -1,0 +1,8 @@
+# Pristine AOSP Bluetooth/Floss source imported under third_party/floss.
+upstream=https://android.googlesource.com/platform/packages/modules/Bluetooth
+mirror=https://github.com/LineageOS/android_packages_modules_Bluetooth
+revision=ab906156f47eaead385190502647fe508229dfbf
+release=android-security-16.0.0_r3-parent
+archive_sha256=e2151e0e09182d4ec17529a207c3e2260cf5675132c97ad891917e852e24c76f
+tree_sha256=dc9e11599a929a23f23177bc6e78e1dc446f71d041265235a84d62d81a169aa9
+license=Apache-2.0

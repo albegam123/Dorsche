@@ -15,7 +15,6 @@
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <time.h>
@@ -33,14 +32,6 @@
 #define DORSCHE_HAS_DMA_BUF_SYNC 1
 #else
 #define DORSCHE_HAS_DMA_BUF_SYNC 0
-#endif
-
-#if __has_include(<bluetooth/bluetooth.h>) && __has_include(<bluetooth/hci.h>)
-#include <bluetooth/bluetooth.h>
-#include <bluetooth/hci.h>
-#define DORSCHE_HAS_RAW_HCI 1
-#else
-#define DORSCHE_HAS_RAW_HCI 0
 #endif
 
 #if __has_include(<linux/memfd.h>)
@@ -212,30 +203,6 @@ std::int32_t HardwareFrame::take_buffer_fd() noexcept {
 
 std::int32_t HardwareFrame::take_fence_fd() noexcept {
   return std::exchange(fence_fd_, -1);
-}
-
-HardwareController::HardwareController() {
-#if DORSCHE_HAS_RAW_HCI
-  // Floss-style user-space ownership begins with the raw HCI control channel.
-  // Failure is non-fatal so the synthetic/audio-only backend runs in CI.
-  hci_control_fd_ =
-      ::socket(AF_BLUETOOTH, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, BTPROTO_HCI);
-  if (hci_control_fd_ >= 0) {
-    sockaddr_hci address{};
-    address.hci_family = AF_BLUETOOTH;
-    address.hci_dev = HCI_DEV_NONE;
-    address.hci_channel = HCI_CHANNEL_CONTROL;
-    if (::bind(hci_control_fd_, reinterpret_cast<sockaddr*>(&address),
-               sizeof(address)) < 0) {
-      ::close(hci_control_fd_);
-      hci_control_fd_ = -1;
-    }
-  }
-#endif
-}
-
-HardwareController::~HardwareController() {
-  if (hci_control_fd_ >= 0) ::close(hci_control_fd_);
 }
 
 std::unique_ptr<HardwareFrame> HardwareController::capture_next() {

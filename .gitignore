@@ -1,4 +1,6 @@
 /target/
+/.cache/
+/out/
 *.swp
 *.swo
 .idea/

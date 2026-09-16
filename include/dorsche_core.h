@@ -44,8 +44,7 @@ class HardwareFrame final {
 
 class HardwareController final {
  public:
-  HardwareController();
-  ~HardwareController();
+  HardwareController() = default;
 
   HardwareController(const HardwareController&) = delete;
   HardwareController& operator=(const HardwareController&) = delete;
@@ -56,7 +55,6 @@ class HardwareController final {
 
  private:
   std::uint64_t capture_sequence_{0};
-  std::int32_t hci_control_fd_{-1};
 };
 
 std::unique_ptr<HardwareController> new_hardware_controller();

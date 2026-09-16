@@ -1,5 +1,12 @@
 # Dorsche
 
+The repository now vendors the real AOSP Gabeldorsche/Fluoride/Floss Bluetooth
+stack under `third_party/floss`; see [docs/FLOSS_PORT.md](docs/FLOSS_PORT.md).
+That upstream code—not the small audio experiment below—owns HCI, pairing,
+L2CAP/GATT, Bluetooth profiles, and the Linux D-Bus services. The Dorsche audio
+graph attaches at Floss's existing media D-Bus and UIPC boundaries so the
+Bluetooth core remains unmodified.
+
 Dorsche is a compact Linux wireless/audio perception skeleton inspired by the
 layering of Floss/Gabeldorsche and the fd-oriented graph model of PipeWire. The
 hardware plane is C++20; the ownership, scheduling, and graph plane is Rust on
@@ -79,6 +86,6 @@ assistant is playing. Expected output includes a `barge-in` event followed by
 immediate playback cancellation. A production backend replaces the synthetic
 fill/playback bodies with HCI/ALSA/USB ioctls and replaces `eventfd` with the
 kernel driver's `sync_file`; none of the Rust graph or ownership boundaries need
-to change. The demo already attempts a nonblocking raw HCI control socket and
-brackets DMA-heap CPU access with `DMA_BUF_IOCTL_SYNC` when the relevant Linux
-UAPI headers are available.
+to change. The demo brackets DMA-heap CPU access with `DMA_BUF_IOCTL_SYNC` when
+the relevant Linux UAPI headers are available. HCI ownership belongs exclusively
+to the vendored Floss `btadapterd`, never to this audio shim.
