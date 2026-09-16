@@ -113,3 +113,18 @@ administrator config exists, installs `config/floss/sysprops.conf`. It disables
 only the Android-specific `LE_GET_VENDOR_CAPABILITIES` probe; standard USB HCI
 controllers are not required to implement that vendor opcode. Existing host
 configuration is never overwritten.
+
+The installer also adds a systemd drop-in making `bluetooth-audio` a
+supplementary group of `btadapterd`. This lets the daemon assign its A2DP/SCO
+UIPC sockets to the intended group without broadening its upstream capability
+bounding set. Rust audio clients use Tokio-native `zbus` for control methods and
+SCM_RIGHTS FD transfer; no C-style D-Bus glue is needed.
+
+## Linux audio-server direction
+
+The production graph target is PipeWire with Rust-native PipeWire/libspa
+bindings and negotiated SPA buffers. `zbus` owns the Floss control plane;
+PipeWire owns graph scheduling, devices, clock domains, and buffer negotiation;
+Floss UIPC remains the Classic Bluetooth transport boundary. TinyALSA may be
+used only as a low-level ALSA diagnostic during hardware bring-up. It is not the
+application graph, and GStreamer is not part of the architecture.

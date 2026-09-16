@@ -33,6 +33,8 @@ install -D -m 0644 "$package/lib/systemd/system/btmanagerd.service" \
   /usr/lib/systemd/system/btmanagerd.service
 install -D -m 0644 "$package/lib/systemd/system/btadapterd@.service" \
   /usr/lib/systemd/system/btadapterd@.service
+install -D -m 0644 "$root/config/floss/systemd/10-dorsche-audio.conf" \
+  /etc/systemd/system/btadapterd@.service.d/10-dorsche-audio.conf
 install -d -m 0750 -g bluetooth /var/lib/bluetooth /var/log/bluetooth
 if [[ ! -e /var/lib/bluetooth/sysprops.conf ]]; then
   install -m 0640 -g bluetooth "$root/config/floss/sysprops.conf" \

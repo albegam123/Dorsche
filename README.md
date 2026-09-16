@@ -70,6 +70,7 @@ src/bridge.rs              audited cxx ABI and Send safety contract
 src/main.rs                graph construction and shutdown
 src/topshim/frame.rs       fd/fence adoption and mapped frame lease
 src/topshim/actors.rs      four message-passing actors and priority tracks
+src/bin/floss_audio_smoke.rs  native zbus + Floss UIPC A2DP hardware smoke test
 ```
 
 ## Run
@@ -92,3 +93,15 @@ kernel driver's `sync_file`; none of the Rust graph or ownership boundaries need
 to change. The demo brackets DMA-heap CPU access with `DMA_BUF_IOCTL_SYNC` when
 the relevant Linux UAPI headers are available. HCI ownership belongs exclusively
 to the vendored Floss `btadapterd`, never to this audio shim.
+
+For a real Floss A2DP sink, use the native Rust control/data-plane smoke test:
+
+```bash
+cargo run --bin floss_audio_smoke -- \
+  --address F0:BE:25:79:62:A4 --seconds 3 --volume 40
+```
+
+The tool uses Tokio-native `zbus`, including SCM_RIGHTS transfer of the listener
+FD required by `StartAudioRequest`, and feeds paced 48-kHz/S16LE/stereo PCM into
+Floss's existing UIPC socket. The caller must be a member of `bluetooth-audio`;
+root is neither required nor recommended after logging into the updated group.

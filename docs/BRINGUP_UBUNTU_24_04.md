@@ -5,11 +5,13 @@ Date: 2026-09-16 UTC
 ## Result
 
 P0 build, controller ownership, daemon startup, system D-Bus export, and active
-BR/EDR + LE discovery passed on a standard x86_64 Ubuntu 24.04 host.
+BR/EDR + LE discovery passed on a standard x86_64 Ubuntu 24.04 host. Classic
+pairing/profile connection and a deterministic A2DP/SBC PCM stream have also
+passed on real hardware.
 
-This is a real hardware smoke pass, not a socket-only simulation. Pairing,
-profile connection, A2DP PCM, HFP/SCO PCM, LE Audio, suspend/resume, and soak
-remain open and must not be inferred from this result.
+This is a real hardware smoke pass, not a socket-only simulation. HFP/SCO PCM,
+LE Audio, repeated reconnect/suspend/resume, and soak remain open and must not
+be inferred from this result.
 
 ## Environment
 
@@ -59,6 +61,48 @@ D-Bus calls returned controller address `00:1A:7D:DA:71:13`,
 `StartDiscovery=true`, and `IsDiscovering=true`. The journal recorded multiple
 remote inquiry results. `CancelDiscovery=true` returned the controller to
 `IsDiscovering=false` while `btadapterd@0.service` remained active.
+
+## Classic headset and A2DP result
+
+Floss bonded and connected a UGREEN HiTune T3 (`F0:BE:25:79:62:A4`). SDP and
+profile callbacks confirmed A2DP Sink, AVRCP Controller, and HFP SLC. Dorsche's
+Tokio-native `zbus` client then exercised the upstream media API without a C or
+Python D-Bus shim:
+
+- `SetAudioConfig` selected SBC, 48 kHz, signed 16-bit stereo;
+- `StartAudioRequest` transferred a Unix listener FD with SCM_RIGHTS and Floss
+  acknowledged it with status byte `1`;
+- the Rust client fed 595,200 bytes of paced PCM over `.a2dp_data` for a
+  three-second 440 Hz tone plus a 100 ms silent drain tail;
+- the Floss SBC encoder reported 3840 PCM bytes per 20 ms tick and a final
+  278-kbit/s configuration;
+- `StopAudioRequest` acknowledged status byte `0`, and
+  `GetA2dpAudioStarted` returned false after suspend;
+- no PCM underflow was logged during the measured feed interval.
+
+The unmodified upstream service unit restricts the daemon to network
+capabilities, so its attempt to assign the UIPC socket to `bluetooth-audio`
+needs that supplementary group. Dorsche installs a minimal systemd drop-in for
+the group membership; it does not grant `CAP_CHOWN` or patch Floss.
+
+## HFP/SCO status
+
+HFP service-level connection passed, and `StartScoCall` progressed through
+codec negotiation to Floss `BTA_AG_SCO_OPEN_ST`; the listener reported CVSD and
+`.sco_data` was created. This is not yet an HFP audio pass. Ubuntu's upstream
+6.8 kernel does not implement the ChromeOS management extensions used by Floss:
+
+```text
+MGMT_OP_GET_SCO_CODEC_CAPABILITIES = 0x0100
+MGMT_OP_NOTIFY_SCO_CONNECTION_CHANGE = 0x0101
+```
+
+The USB audio interface consequently stayed at alternate setting zero, no SCO
+clock packets reached Floss, and the UIPC transmit queue stopped draining. The
+call was explicitly stopped and acknowledged. The next HFP task is a reviewed
+upstream-kernel compatibility adapter (or the corresponding ChromeOS kernel
+support); changing PipeWire, ALSA, or the application PCM code cannot repair
+this missing btusb isochronous transport notification.
 
 ## Controller compatibility setting
 
