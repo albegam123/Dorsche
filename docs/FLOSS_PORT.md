@@ -125,6 +125,12 @@ The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresse
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream
 `-Werror` checks remain active.
 
+Linux 6.18.15 has a separate btusb teardown race: SCO transmit URBs can outlive
+the endpoint alternate setting they were built against. The independently
+reviewable fix is kept in `kernel/patches/`; see `kernel/README.md`. It changes
+neither Floss nor the pristine import and is not required for controllers whose
+kernel driver already serializes isochronous TX teardown.
+
 At install time, Dorsche creates the runtime state/log directories and, when no
 administrator config exists, installs `config/floss/sysprops.conf`. It disables
 only the Android-specific `LE_GET_VENDOR_CAPABILITIES` probe; standard USB HCI

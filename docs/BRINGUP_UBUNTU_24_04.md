@@ -151,6 +151,20 @@ Observed hardware results:
 - `StopScoCall` acknowledged cleanly, `btadapterd` remained active, and no
   kernel oops was observed.
 
-This closes the original upstream-Linux HFP transport gap without modifying the
-kernel tree or introducing an external controller owner. Transparent mSBC
-(altsetting 1), RF-loss recovery, and long-duration soak remain separate tests.
+Transparent mSBC was subsequently validated using the controller's 48-byte USB
+SCO packet layout. A ten-second 16-kHz/S16LE/mono live microphone loopback sent
+and captured 319,440 bytes (`RMS=35.1`, `peak=1403`). A following five-second
+CVSD regression sent and captured 79,776 bytes (`RMS=3029.6`, `peak=28079`).
+Both tests stopped cleanly.
+
+Those runs also exposed and then validated a Linux btusb teardown fix. Upstream
+6.18.15 can switch the USB isochronous interface to altsetting zero while a SCO
+TX URB is still being submitted on the shared TX anchor, yielding one
+`submission failed (90)` message. The out-of-tree patch documented in
+`kernel/README.md` gives SCO TX its own anchor and serializes it with altsetting
+changes. With the final module, consecutive mSBC and CVSD runs completed with no
+new kernel message or oops. An eight-second A2DP/SBC regression then sent
+1,555,200 bytes of 48-kHz/S16LE/stereo PCM, stopped with listener status zero,
+and likewise added no kernel message. The user's original kernel source tree
+was never modified. RF-loss recovery and long-duration soak remain separate
+tests.
