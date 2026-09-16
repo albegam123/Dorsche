@@ -119,3 +119,35 @@ Without it, the HCI watchdog correctly requests a controller reset after the
 vendor command timeout. This is configuration, not a fork of controller logic,
 and can be re-enabled for a controller whose firmware implements the Android
 vendor extension.
+
+## Linux 6.18.15 HFP/SCO follow-up
+
+A follow-up run used the same CSR USB controller and headset on a Debian 12
+host running upstream Linux 6.18.15. Because the controller address and the
+headset's stored identity were unchanged, its existing Floss bond record was
+migrated to the second host; no key material is stored in this repository.
+The headset then reconnected with A2DP, AVRCP, and HFP SLC active.
+
+The patched host transport uses Linux 6.18's upstream `HCI_DRV_PKT` on Floss's
+existing `HCI_CHANNEL_USER` socket. The opt-in sysprop is also registered in
+Floss's explicit Linux sysprop allowlist; merely adding an unknown key to
+`sysprops.conf` is intentionally ineffective.
+
+Observed hardware results:
+
+- A2DP/SBC at 48-kHz/S16LE/stereo sent 595,200 bytes of paced PCM and stopped
+  with listener status zero;
+- HFP forced CVSD at 8-kHz/S16LE/mono and completed two full-duplex runs;
+- the five-second run sent 80,000 bytes and captured 79,824 bytes from the
+  headset microphone (`RMS=2111.9`, `peak=21111`);
+- the repeat run sent 32,000 bytes and captured 31,824 bytes
+  (`RMS=2446.0`, `peak=19728`);
+- the btusb audio interface transitioned `bAlternateSetting 0 -> 2 -> 0`;
+- the repeat trace observed altsetting 2 approximately 413 ms after test start
+  and restoration to zero approximately 32 ms after the two-second stream;
+- `StopScoCall` acknowledged cleanly, `btadapterd` remained active, and no
+  kernel oops was observed.
+
+This closes the original upstream-Linux HFP transport gap without modifying the
+kernel tree or introducing an external controller owner. Transparent mSBC
+(altsetting 1), RF-loss recovery, and long-duration soak remain separate tests.

@@ -75,6 +75,16 @@
  hci::RemoteNameRequestModule* GetRemoteNameRequest();
  hci::DistanceMeasurementManager* GetDistanceMeasurementManager();
  hci::LeScanningManager* GetScanning();
+--- a/system/gd/sysprops/sysprops_module.cc
++++ b/system/gd/sysprops/sysprops_module.cc
+@@ -123,6 +123,7 @@
+           // SCO
+           "bluetooth.sco.disable_enhanced_connection",
+           "bluetooth.sco.swb_supported",
++          "bluetooth.hfp.linux_hci_driver_altsetting.enabled",
+           // Profile
+           "bluetooth.hid.wait_ms_after_uhid_open",
+           "persist.bluetooth.avrcpcontrolversion",
 --- a/system/stack/btm/btm_sco_hfp_hal_linux.cc
 +++ b/system/stack/btm/btm_sco_hfp_hal_linux.cc
 @@ -21,6 +21,7 @@
