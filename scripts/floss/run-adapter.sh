@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 state="${DORSCHE_FLOSS_STATE:-$root/.cache/floss}"
 hci="${1:-0}"
-binary="${DORSCHE_BTADAPTERD:-$state/output/debug/btadapterd}"
+binary="${DORSCHE_BTADAPTERD:-$state/output/release/btadapterd}"
 
 [[ "$hci" =~ ^[0-9]+$ ]] || {
   printf 'HCI index must be numeric.\n' >&2
@@ -30,8 +30,9 @@ else
   sudo "${mkdir_audio[@]}"
 fi
 
-# INIT_gd_hci selects GD's HCI module while all profile/state-machine code is
-# still the upstream Floss/Fluoride build. Extra init flags may be appended via
-# DORSCHE_FLOSS_INIT_FLAGS as a whitespace-separated development override.
-read -r -a extra_flags <<< "${DORSCHE_FLOSS_INIT_FLAGS:-}"
-exec "$binary" --hci="$hci" INIT_gd_hci=true "${extra_flags[@]}"
+# This upstream revision selects its Linux HCI implementation at build time;
+# Android-style INIT_* positional flags are not part of btadapterd's CLI.
+# Optional daemon switches such as `--debug --log-output=stderr` may be supplied
+# as a whitespace-separated development override.
+read -r -a extra_args <<< "${DORSCHE_BTADAPTERD_ARGS:-}"
+exec "$binary" --hci="$hci" "${extra_args[@]}"

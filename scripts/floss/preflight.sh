@@ -39,8 +39,8 @@ else
   ok 'BlueZ bluetoothd is not running'
 fi
 
-if [[ -x "$state/output/debug/btadapterd" ]]; then
-  ok "btadapterd built at $state/output/debug/btadapterd"
+if [[ -x "$state/output/release/btadapterd" ]]; then
+  ok "btadapterd built at $state/output/release/btadapterd"
 else
   warn 'btadapterd has not been built yet'
 fi

@@ -2,6 +2,9 @@
 
 The repository now vendors the real AOSP Gabeldorsche/Fluoride/Floss Bluetooth
 stack under `third_party/floss`; see [docs/FLOSS_PORT.md](docs/FLOSS_PORT.md).
+The prioritized hardware matrix is in [docs/TEST_PLAN.md](docs/TEST_PLAN.md),
+and the first Ubuntu/USB-controller result is recorded in
+[docs/BRINGUP_UBUNTU_24_04.md](docs/BRINGUP_UBUNTU_24_04.md).
 That upstream code—not the small audio experiment below—owns HCI, pairing,
 L2CAP/GATT, Bluetooth profiles, and the Linux D-Bus services. The Dorsche audio
 graph attaches at Floss's existing media D-Bus and UIPC boundaries so the

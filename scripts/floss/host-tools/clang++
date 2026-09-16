@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# build.py fixes external_cxxflags internally, so a normal CXXFLAGS override is
+# ignored. Append only the Clang 18 compatibility diagnostic after GN's flags;
+# all other -Werror checks remain active. Override the real compiler if needed.
+exec "${DORSCHE_HOST_CXX:-/usr/bin/clang++}" "$@" \
+  -Wno-error=vla-cxx-extension

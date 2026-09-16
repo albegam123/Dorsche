@@ -1,0 +1,41 @@
+diff --git a/system/gd/rust/topshim/macros/Cargo.toml b/system/gd/rust/topshim/macros/Cargo.toml
+index 5397b0b..24f4aed 100644
+--- a/system/gd/rust/topshim/macros/Cargo.toml
++++ b/system/gd/rust/topshim/macros/Cargo.toml
+@@ -6,6 +6,6 @@ edition = "2018"
+ proc-macro = true
+ 
+ [dependencies]
+-syn = "1.0"
++syn = { version = "1.0", features = ["extra-traits"] }
+ quote = "1.0"
+ proc-macro2 = "1.0"
+diff --git a/system/gd/rust/linux/utils/Cargo.toml b/system/gd/rust/linux/utils/Cargo.toml
+index 60bad32..9ab1395 100644
+--- a/system/gd/rust/linux/utils/Cargo.toml
++++ b/system/gd/rust/linux/utils/Cargo.toml
+@@ -34,4 +34,9 @@ uhid-virt = "0.0.6"
+ tokio = { version = "1", features = ['rt'] }
+ 
++# uhidrs-sys disables bindgen's defaults, including its required dynamic
++# libclang loader. Unify the build graph with that feature enabled.
++[build-dependencies]
++bindgen = { version = "0.71.1", features = ["runtime"] }
++
+ [lib]
+ crate-type = ["rlib"]
+diff --git a/system/gd/rust/topshim/Cargo.toml b/system/gd/rust/topshim/Cargo.toml
+index 3c4201c..bb91011 100644
+--- a/system/gd/rust/topshim/Cargo.toml
++++ b/system/gd/rust/topshim/Cargo.toml
+@@ -23,7 +23,9 @@ edition = "2018"
+ # BT dependencies
+ topshim_macros = { path = "macros" }
+ 
+-cxx = "1.0"
++# Keep Rust's bridge ABI identical to the upstream cxxbridge-cmd installed by
++# the Floss bootstrap (1.0.94); cxx symbol names encode this ABI revision.
++cxx = "=1.0.94"
+ grpcio = { version = "0.13.0", default-features = false, features = ["protobufv3-codec", "openssl"] }
+ log = "0.4"
+ num-derive = "0.3"

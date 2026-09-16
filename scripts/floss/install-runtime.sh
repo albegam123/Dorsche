@@ -11,8 +11,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 for binary in btadapterd btmanagerd btclient; do
-  [[ -x "$state/output/debug/$binary" ]] || {
-    printf 'Missing build artifact: %s/output/debug/%s\n' "$state" "$binary" >&2
+  [[ -x "$state/output/release/$binary" ]] || {
+    printf 'Missing build artifact: %s/output/release/%s\n' "$state" "$binary" >&2
     exit 2
   }
 done
@@ -20,11 +20,11 @@ done
 getent group bluetooth >/dev/null || groupadd --system bluetooth
 getent group bluetooth-audio >/dev/null || groupadd --system bluetooth-audio
 
-install -D -m 0755 "$state/output/debug/btadapterd" \
+install -D -m 0755 "$state/output/release/btadapterd" \
   /usr/libexec/bluetooth/btadapterd
-install -D -m 0755 "$state/output/debug/btmanagerd" \
+install -D -m 0755 "$state/output/release/btmanagerd" \
   /usr/libexec/bluetooth/btmanagerd
-install -D -m 0755 "$state/output/debug/btclient" \
+install -D -m 0755 "$state/output/release/btclient" \
   /usr/local/bin/btclient
 install -D -m 0644 \
   "$package/etc/dbus-1/system.d/org.chromium.bluetooth.conf" \
@@ -33,6 +33,11 @@ install -D -m 0644 "$package/lib/systemd/system/btmanagerd.service" \
   /usr/lib/systemd/system/btmanagerd.service
 install -D -m 0644 "$package/lib/systemd/system/btadapterd@.service" \
   /usr/lib/systemd/system/btadapterd@.service
+install -d -m 0750 -g bluetooth /var/lib/bluetooth /var/log/bluetooth
+if [[ ! -e /var/lib/bluetooth/sysprops.conf ]]; then
+  install -m 0640 -g bluetooth "$root/config/floss/sysprops.conf" \
+    /var/lib/bluetooth/sysprops.conf
+fi
 install -d -m 0770 -g bluetooth-audio /var/run/bluetooth/audio
 
 systemctl daemon-reload
