@@ -1,0 +1,9 @@
+--- a/build.py
++++ b/build.py
+@@ -151 +151 @@
+-REQUIRED_CARGO_PACKAGES = ['cxxbridge-cmd', 'pdl-compiler', 'grpcio-compiler', 'cargo-bloat']
++REQUIRED_CARGO_PACKAGES = ['cxxbridge-cmd', 'pdl-compiler', 'cargo-bloat']
+--- a/system/gd/rust/topshim/Cargo.toml
++++ b/system/gd/rust/topshim/Cargo.toml
+@@ -29 +28,0 @@
+-grpcio = { version = "0.13.0", default-features = false, features = ["protobufv3-codec", "openssl"] }
