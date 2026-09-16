@@ -71,6 +71,7 @@ src/main.rs                graph construction and shutdown
 src/topshim/frame.rs       fd/fence adoption and mapped frame lease
 src/topshim/actors.rs      four message-passing actors and priority tracks
 src/bin/floss_audio_smoke.rs  native zbus + Floss UIPC A2DP hardware smoke test
+src/bin/floss_hfp_smoke.rs    native zbus + full-duplex CVSD/SCO hardware smoke test
 ```
 
 ## Run
@@ -105,3 +106,15 @@ The tool uses Tokio-native `zbus`, including SCM_RIGHTS transfer of the listener
 FD required by `StartAudioRequest`, and feeds paced 48-kHz/S16LE/stereo PCM into
 Floss's existing UIPC socket. The caller must be a member of `bluetooth-audio`;
 root is neither required nor recommended after logging into the updated group.
+
+After A2DP passes, exercise HFP/SCO independently with:
+
+```bash
+cargo run --bin floss_hfp_smoke -- \
+  --address F0:BE:25:79:62:A4 --seconds 5
+```
+
+The HFP test initially forces CVSD so the host PCM contract is deterministic
+(8-kHz/S16LE/mono). It concurrently sends a quiet reference tone and consumes
+microphone PCM, reports byte counts/RMS/peak, and always requests `StopScoCall`
+after an accepted start—even when the data-plane test times out or fails.

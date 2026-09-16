@@ -1,0 +1,124 @@
+--- a/system/gd/hal/hci_hal.h
++++ b/system/gd/hal/hci_hal.h
+@@ -102,6 +102,10 @@
+   // Packets must be processed in order.
+   virtual void sendIsoData(HciPacket data) = 0;
+ 
++  // Send a Linux HCI driver command. This is an optional host transport
++  // extension, not a Bluetooth controller command.
++  virtual bool sendHciDriverCommand(HciPacket /* command */) { return false; }
++
+   // Get the MSFT opcode (as specified in Microsoft-defined Bluetooth HCI
+   // extensions)
+   virtual uint16_t getMsftOpcode() { return 0; }
+--- a/system/gd/hal/hci_hal_host.cc
++++ b/system/gd/hal/hci_hal_host.cc
+@@ -51,6 +51,7 @@
+ constexpr uint8_t kH4Sco = 0x03;
+ constexpr uint8_t kH4Event = 0x04;
+ constexpr uint8_t kH4Iso = 0x05;
++constexpr uint8_t kH4Driver = 0xf1;
+ 
+ constexpr uint8_t kH4HeaderSize = 1;
+ constexpr uint8_t kHciAclHeaderSize = 4;
+@@ -300,6 +301,16 @@
+     write_to_fd(packet);
+   }
+ 
++  bool sendHciDriverCommand(HciPacket command) override {
++    std::lock_guard<std::mutex> lock(api_mutex_);
++    if (sock_fd_ == INVALID_FD) {
++      return false;
++    }
++    command.insert(command.cbegin(), kH4Driver);
++    write_to_fd(std::move(command));
++    return true;
++  }
++
+   uint16_t getMsftOpcode() override {
+     return os::Management::getInstance().getVendorSpecificCode(MGMT_VS_OPCODE_MSFT);
+   }
+--- a/system/main/shim/entry.cc
++++ b/system/main/shim/entry.cc
+@@ -16,6 +16,7 @@
+ 
+ #include "main/shim/entry.h"
+ 
++#include "hal/hci_hal.h"
+ #include "hal/snoop_logger.h"
+ #include "hci/acl_manager.h"
+ #include "hci/controller.h"
+@@ -48,6 +49,8 @@
+ 
+ hci::HciInterface* GetHciLayer() { return Stack::GetInstance()->GetInstance<hci::HciLayer>(); }
+ 
++hal::HciHal* GetHciHal() { return Stack::GetInstance()->GetInstance<hal::HciHal>(); }
++
+ hci::RemoteNameRequestModule* GetRemoteNameRequest() {
+   return Stack::GetInstance()->GetInstance<hci::RemoteNameRequestModule>();
+ }
+--- a/system/main/shim/entry.h
++++ b/system/main/shim/entry.h
+@@ -34,6 +34,7 @@
+ class Handler;
+ }
+ namespace hal {
++class HciHal;
+ class SnoopLogger;
+ }
+ 
+@@ -68,6 +69,7 @@
+ hci::LeAdvertisingManager* GetAdvertising();
+ bluetooth::hci::ControllerInterface* GetController();
+ hci::HciInterface* GetHciLayer();
++hal::HciHal* GetHciHal();
+ hci::RemoteNameRequestModule* GetRemoteNameRequest();
+ hci::DistanceMeasurementManager* GetDistanceMeasurementManager();
+ hci::LeScanningManager* GetScanning();
+--- a/system/stack/btm/btm_sco_hfp_hal_linux.cc
++++ b/system/stack/btm/btm_sco_hfp_hal_linux.cc
+@@ -21,6 +21,7 @@
+ 
+ #include <vector>
+ 
++#include "hal/hci_hal.h"
+ #include "hci/controller_interface.h"
+ #include "main/shim/entry.h"
+ #include "osi/include/properties.h"
+@@ -83,6 +84,17 @@
+ 
+ #define MGMT_POLL_TIMEOUT_MS 2000
+ 
++constexpr char kLinuxHciDriverAltsettingProperty[] =
++        "bluetooth.hfp.linux_hci_driver_altsetting.enabled";
++
++bool switch_linux_hci_driver_altsetting(uint8_t altsetting) {
++  // Linux 6.18 HCI_DRV_PKT command header: opcode 0x0401, payload length 1.
++  // Opcode 0x0401 is btusb's driver-specific Switch Altsetting command.
++  std::vector<uint8_t> command = {0x01, 0x04, 0x01, 0x00, altsetting};
++  auto* hci_hal = bluetooth::shim::GetHciHal();
++  return hci_hal != nullptr && hci_hal->sendHciDriverCommand(std::move(command));
++}
++
+ void cache_codec_capabilities(struct mgmt_rp_get_codec_capabilities* rp) {
+   const uint8_t kCodecMsbc = 0x5;
+ 
+@@ -486,6 +498,18 @@
+             "Failed to notify HAL of connection change: hci {}, device {}, "
+             "connected {}, codec {}",
+             hci, device, is_connected, codec);
++    if (osi_property_get_bool(kLinuxHciDriverAltsettingProperty, false)) {
++      // CVSD with 16-bit host PCM uses altsetting 2 for one SCO link. The
++      // transparent mSBC path uses altsetting 1 on generic USB controllers.
++      const uint8_t altsetting = !is_connected ? 0
++              : converted_codec == MGMT_SCO_CODEC_CVSD ? 2
++                                                       : 1;
++      if (switch_linux_hci_driver_altsetting(altsetting)) {
++        bluetooth::log::info("Queued Linux HCI driver altsetting {}", altsetting);
++      } else {
++        bluetooth::log::error("Failed to queue Linux HCI driver altsetting {}", altsetting);
++      }
++    }
+   } else {
+     bluetooth::log::info(
+             "Notified HAL of connection change: hci {}, device {}, connected {}, "

@@ -46,7 +46,7 @@ ensure_host_overlay() {
   local revision
   local overlay_id
   revision="$(sed -n 's/^revision=//p' "$root/vendor/floss.lock")"
-  overlay_id="$revision:$(sha256sum "$root/scripts/floss/patches/0001-syn-extra-traits.patch" | cut -d' ' -f1)"
+  overlay_id="$revision:$(sha256sum "$root"/scripts/floss/patches/*.patch | cut -d' ' -f1 | sha256sum | cut -d' ' -f1)"
 
   if [[ -f "$marker" ]] && [[ "$(<"$marker")" == "$overlay_id" ]]; then
     return
@@ -61,6 +61,8 @@ ensure_host_overlay() {
   rm -f "$overlay/Cargo.lock"
   patch --directory="$overlay" --strip=1 \
     < "$root/scripts/floss/patches/0001-syn-extra-traits.patch"
+  patch --directory="$overlay" --strip=1 \
+    < "$root/scripts/floss/patches/0002-linux-hci-driver-altsetting.patch"
   printf '%s\n' "$overlay_id" > "$overlay/.dorsche-host-overlay"
   rm -rf "$staged"
   mv "$overlay" "$staged"

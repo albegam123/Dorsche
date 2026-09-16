@@ -95,14 +95,31 @@ pair a device, and exercise GATT/A2DP/HFP. Production installation should use
 the unmodified D-Bus policy and systemd units under
 `third_party/floss/system/build/dpkg/floss/package`.
 
-## Host compatibility overlay
+## Minimal host overlay
 
 `scripts/floss/build.sh` makes an out-of-tree copy under
-`.cache/floss/staging/bt` and applies the narrowly scoped patch recorded in
-`scripts/floss/patches/`. The overlay pins the Rust `cxx` crate to the same
+`.cache/floss/staging/bt` and applies the narrowly scoped patches recorded in
+`scripts/floss/patches/`. The first patch pins the Rust `cxx` crate to the same
 1.0.94 ABI as AOSP's `cxxbridge` generator and enables two dependency features
-normally supplied by ChromiumOS's vendored Rust graph. The imported
-`third_party/floss` tree is never patched and remains verifiable byte-for-byte.
+normally supplied by ChromiumOS's vendored Rust graph. The second patch exposes
+Linux 6.18's upstream `HCI_DRV_PKT` transport through the existing host HCI user
+socket. On HFP SCO connect/disconnect it can send btusb's switch-altsetting
+driver command (opcode `0x0401`) instead of relying on the ChromeOS-private
+management opcode. The imported `third_party/floss` tree is never patched and
+remains verifiable byte-for-byte.
+
+The HCI driver command path defaults off. Enable it only on Linux 6.18 or newer
+after confirming the controller uses upstream `HCI_DRV_PKT`:
+
+```ini
+bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
+```
+
+That gate preserves the behavior of older kernels. CVSD selects USB
+altsetting 2, transparent mSBC selects altsetting 1, and disconnect restores
+altsetting 0. The command must be sent by Floss because its
+`HCI_CHANNEL_USER` socket exclusively owns the controller; a sidecar process
+or external kernel module would violate that ownership model.
 
 The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresses
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream

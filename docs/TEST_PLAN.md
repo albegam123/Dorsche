@@ -53,7 +53,11 @@ exclusive-ownership, permissions, or daemon-startup issues—not audio issues.
 2. Feed deterministic PCM through `/var/run/bluetooth/audio/.a2dp_data` and
    check channel order, sample rate, underruns, presentation position, and drift.
 3. Start HFP/SCO using `/var/run/bluetooth/audio/.sco_data`; verify both directions,
-   mSBC where supported, call-state transitions, and recovery after RF loss.
+   initially forcing CVSD with `floss_hfp_smoke`. Require USB interface
+   altsetting `0 -> 2 -> 0`, nonzero downlink/uplink byte counts, microphone
+   RMS/peak, and clean `StopScoCall` on every error path. Then enable mSBC where
+   supported and verify altsetting `0 -> 1 -> 0`, call-state transitions, and
+   recovery after RF loss.
 4. Only after the existing UIPC ABI is stable, attach Dorsche's PipeWire graph.
 
 ### P3: AI audio and barge-in
