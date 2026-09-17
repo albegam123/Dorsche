@@ -1,6 +1,7 @@
 use std::f32::consts::TAU;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -56,6 +57,7 @@ struct Args {
     seconds: u64,
     volume: u8,
     frequency_hz: f32,
+    pcm_path: Option<PathBuf>,
 }
 
 impl Args {
@@ -66,6 +68,7 @@ impl Args {
             seconds: 3,
             volume: 40,
             frequency_hz: 440.0,
+            pcm_path: None,
         };
 
         while let Some(arg) = args.next() {
@@ -75,10 +78,11 @@ impl Args {
                 "--seconds" => parsed.seconds = args.next().ok_or_else(value)?.parse()?,
                 "--volume" => parsed.volume = args.next().ok_or_else(value)?.parse()?,
                 "--frequency" => parsed.frequency_hz = args.next().ok_or_else(value)?.parse()?,
+                "--pcm" => parsed.pcm_path = Some(PathBuf::from(args.next().ok_or_else(value)?)),
                 "-h" | "--help" => {
                     println!(
                         "Usage: floss_audio_smoke --address XX:XX:XX:XX:XX:XX \
-                         [--seconds 3] [--volume 40] [--frequency 440]"
+                         [--seconds 3] [--volume 40] [--frequency 440] [--pcm FILE]"
                     );
                     std::process::exit(0);
                 }
@@ -198,6 +202,28 @@ async fn write_test_tone(stream: &mut UnixStream, args: &Args) -> Result<u64> {
     Ok((tick_count + 5) * pcm.len() as u64)
 }
 
+async fn write_pcm_file(stream: &mut UnixStream, path: &PathBuf) -> Result<u64> {
+    let pcm = std::fs::read(path).with_context(|| format!("read PCM from {}", path.display()))?;
+    let frame_bytes = FRAMES_PER_TICK * CHANNELS * size_of::<i16>();
+    if pcm.is_empty() || pcm.len() % (CHANNELS * size_of::<i16>()) != 0 {
+        bail!("PCM file must contain non-empty 48-kHz/S16LE/stereo frames");
+    }
+
+    let mut ticker = interval_at(Instant::now(), FRAME_TIME);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut bytes = 0_u64;
+    for chunk in pcm.chunks(frame_bytes) {
+        ticker.tick().await;
+        stream
+            .write_all(chunk)
+            .await
+            .context("feed A2DP PCM file")?;
+        bytes += chunk.len() as u64;
+    }
+    stream.shutdown().await.context("close A2DP data stream")?;
+    Ok(bytes)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse()?;
@@ -242,8 +268,13 @@ async fn main() -> Result<()> {
         SAMPLE_RATE, args.volume
     );
     let mut data = connect_uipc().await?;
-    let bytes = write_test_tone(&mut data, &args).await?;
-    println!("sent {bytes} PCM bytes at {} Hz", args.frequency_hz);
+    if let Some(path) = &args.pcm_path {
+        let bytes = write_pcm_file(&mut data, path).await?;
+        println!("sent {bytes} PCM bytes from {}", path.display());
+    } else {
+        let bytes = write_test_tone(&mut data, &args).await?;
+        println!("sent {bytes} PCM bytes at {} Hz", args.frequency_hz);
+    }
 
     let (mut stop_rx, stop_tx) = listener_pair().await?;
     media.stop_audio_request(Fd::from(stop_tx.as_fd())).await?;

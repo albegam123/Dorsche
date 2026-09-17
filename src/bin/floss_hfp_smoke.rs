@@ -1,6 +1,7 @@
 use std::f32::consts::TAU;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -92,6 +93,7 @@ struct Args {
     frequency_hz: f32,
     loopback: bool,
     loopback_gain: f32,
+    capture_path: Option<PathBuf>,
     codec: Codec,
 }
 
@@ -104,6 +106,7 @@ impl Args {
             frequency_hz: 440.0,
             loopback: false,
             loopback_gain: 0.35,
+            capture_path: None,
             codec: Codec::Cvsd,
         };
 
@@ -117,12 +120,15 @@ impl Args {
                 "--loopback-gain" => {
                     parsed.loopback_gain = args.next().ok_or_else(value)?.parse()?
                 }
+                "--capture" => {
+                    parsed.capture_path = Some(PathBuf::from(args.next().ok_or_else(value)?))
+                }
                 "--codec" => parsed.codec = Codec::parse(&args.next().ok_or_else(value)?)?,
                 "-h" | "--help" => {
                     println!(
                         "Usage: floss_hfp_smoke --address XX:XX:XX:XX:XX:XX \
                          [--seconds 5] [--codec cvsd|msbc] [--frequency 440] \
-                         [--loopback [--loopback-gain 0.35]]"
+                         [--loopback [--loopback-gain 0.35]] [--capture FILE]"
                     );
                     std::process::exit(0);
                 }
@@ -202,7 +208,10 @@ impl CaptureStats {
     }
 }
 
-async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, CaptureStats)> {
+async fn exercise_full_duplex(
+    stream: UnixStream,
+    args: &Args,
+) -> Result<(u64, CaptureStats, Vec<u8>)> {
     let (mut reader, mut writer) = stream.into_split();
     let duration = Duration::from_secs(args.seconds);
     let frequency_hz = args.frequency_hz;
@@ -239,6 +248,8 @@ async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, C
     let capture = async move {
         let deadline = Instant::now() + duration;
         let mut stats = CaptureStats::default();
+        let mut captured_pcm =
+            Vec::with_capacity(sample_rate * size_of::<i16>() * args.seconds as usize);
         let mut buffer = [0_u8; 640];
         loop {
             tokio::select! {
@@ -249,18 +260,23 @@ async fn exercise_full_duplex(stream: UnixStream, args: &Args) -> Result<(u64, C
                         break;
                     }
                     stats.account(&buffer[..read]);
+                    captured_pcm.extend_from_slice(&buffer[..read]);
                 }
             }
         }
-        Ok::<_, anyhow::Error>(stats)
+        Ok::<_, anyhow::Error>((stats, captured_pcm))
     };
 
     // The two halves must run concurrently: servicing downlink only would
     // eventually back-pressure uplink and invalidate this full-duplex test.
-    tokio::try_join!(playback, capture)
+    let (played, (captured, captured_pcm)) = tokio::try_join!(playback, capture)?;
+    Ok((played, captured, captured_pcm))
 }
 
-async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, CaptureStats)> {
+async fn exercise_loopback(
+    stream: UnixStream,
+    args: &Args,
+) -> Result<(u64, CaptureStats, Vec<u8>)> {
     let (mut reader, mut writer) = stream.into_split();
     let deadline = Instant::now() + Duration::from_secs(args.seconds);
     let gain = args.loopback_gain;
@@ -270,6 +286,8 @@ async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, Capt
 
     let capture = async move {
         let mut stats = CaptureStats::default();
+        let mut captured_pcm =
+            Vec::with_capacity(args.codec.sample_rate() * size_of::<i16>() * args.seconds as usize);
         let mut buffer = [0_u8; 640];
         loop {
             let read = tokio::select! {
@@ -282,6 +300,7 @@ async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, Capt
                 break;
             }
             stats.account(&buffer[..read]);
+            captured_pcm.extend_from_slice(&buffer[..read]);
             // Ownership, rather than a shared mutable buffer, crosses from the
             // uplink task to the downlink task. No lock is on the audio path.
             let frame = buffer[..read].to_vec();
@@ -294,7 +313,7 @@ async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, Capt
                 }
             }
         }
-        Ok::<_, anyhow::Error>(stats)
+        Ok::<_, anyhow::Error>((stats, captured_pcm))
     };
 
     let playback = async move {
@@ -321,8 +340,8 @@ async fn exercise_loopback(stream: UnixStream, args: &Args) -> Result<(u64, Capt
         Ok::<_, anyhow::Error>(bytes)
     };
 
-    let (captured, played) = tokio::try_join!(capture, playback)?;
-    Ok((played, captured))
+    let ((captured, captured_pcm), played) = tokio::try_join!(capture, playback)?;
+    Ok((played, captured, captured_pcm))
 }
 
 async fn stop_sco(media: &BluetoothMediaProxy<'_>, address: &str) -> Result<u8> {
@@ -380,7 +399,7 @@ async fn main() -> Result<()> {
         );
 
         let data = connect_sco_uipc().await?;
-        let (played, captured) = timeout(
+        let (played, captured, captured_pcm) = timeout(
             Duration::from_secs(args.seconds + 5),
             async {
                 if args.loopback {
@@ -401,6 +420,16 @@ async fn main() -> Result<()> {
         );
         if captured.bytes == 0 {
             bail!("SCO uplink produced no microphone PCM");
+        }
+        if let Some(path) = &args.capture_path {
+            std::fs::write(path, &captured_pcm)
+                .with_context(|| format!("write captured PCM to {}", path.display()))?;
+            println!(
+                "captured raw PCM: {} ({} Hz/S16LE/mono, {} B)",
+                path.display(),
+                args.codec.sample_rate(),
+                captured_pcm.len()
+            );
         }
         Ok::<_, anyhow::Error>(())
     }
