@@ -5,6 +5,34 @@ user's kernel checkout. The patches in `kernel/patches/` are narrow Linux host
 compatibility fixes that can be reviewed, applied, built, and upstreamed
 independently.
 
+## Floss userspace SCO coordination
+
+`0002-bluetooth-add-floss-userspace-sco.patch` ports the official ChromiumOS
+6.12 Floss management ABI (changes `eeeacf6d3992`, `31fcd20e5178`, and the
+2026 lifetime fix `4fee0077f6d2`) to mainline Linux 6.18.15. It adds management
+operations `0x0100` and `0x0101`, reports the kernel driver's WBS capability and
+packet length, and lets Floss notify the kernel of SCO connection state and
+codec.
+
+The ABI deliberately contains no USB VID:PID or alternate setting. Once the
+notification creates the kernel's shadow SCO connection, existing
+`btusb_work()` code chooses the isochronous layout using USB descriptors,
+controller SCO MTU, and kernel-owned flags. Controllers not marked with
+`HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED` are not offered transparent mSBC.
+
+Apply both patches, in order:
+
+```bash
+git -C /path/to/linux apply --check \
+  /path/to/Dorsche/kernel/patches/0001-bluetooth-btusb-serialize-sco-tx-altsetting.patch
+git -C /path/to/linux apply --check \
+  /path/to/Dorsche/kernel/patches/0002-bluetooth-add-floss-userspace-sco.patch
+git -C /path/to/linux apply \
+  /path/to/Dorsche/kernel/patches/0001-bluetooth-btusb-serialize-sco-tx-altsetting.patch
+git -C /path/to/linux apply \
+  /path/to/Dorsche/kernel/patches/0002-bluetooth-add-floss-userspace-sco.patch
+```
+
 ## Linux 6.18 btusb SCO teardown race
 
 `0001-bluetooth-btusb-serialize-sco-tx-altsetting.patch` fixes a race between

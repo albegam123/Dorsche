@@ -1,0 +1,206 @@
+From: Dorsche Project <dorsche@localhost>
+Date: Thu, 17 Sep 2026 19:20:00 +0000
+Subject: [PATCH] Bluetooth: add Floss userspace SCO coordination
+
+Floss owns the controller through HCI_CHANNEL_USER, so the kernel cannot
+infer SCO connection state from its normal HCI connection machinery.
+Port the ChromiumOS userspace-SCO management interface to Linux 6.18:
+report driver WBS capability and packet length, and accept connection
+state plus codec notifications from Floss.
+
+Keep USB transport policy inside btusb. Userspace supplies neither a USB
+VID:PID nor an alternate setting. btusb continues to select alt 6, alt 3,
+or alt 1 from descriptors, SCO MTU, and its kernel-owned flags.
+
+The management ABI and behavior follow ChromiumOS chromeos-6.12 changes
+eeeacf6d3992 and 31fcd20e5178, including the 2026 hci_dev lifetime and
+connection-locking fix 4fee0077f6d2.
+
+diff --git a/include/net/bluetooth/hci_core.h b/include/net/bluetooth/hci_core.h
+--- a/include/net/bluetooth/hci_core.h
++++ b/include/net/bluetooth/hci_core.h
+@@ -485,6 +485,7 @@
+ 	unsigned int	sco_pkts;
+ 	unsigned int	le_pkts;
+ 	unsigned int	iso_pkts;
++	unsigned int	wbs_pkt_len;
+ 
+ 	unsigned long	acl_last_tx;
+ 	unsigned long	le_last_tx;
+diff --git a/include/net/bluetooth/mgmt.h b/include/net/bluetooth/mgmt.h
+--- a/include/net/bluetooth/mgmt.h
++++ b/include/net/bluetooth/mgmt.h
+@@ -894,6 +894,36 @@
+ } __packed;
+ #define MGMT_HCI_CMD_SYNC_SIZE		6
+ 
++/* ChromiumOS Floss host/driver coordination. These commands carry codec
++ * semantics only; USB alternate-setting policy remains in the HCI driver.
++ */
++#define MGMT_OP_GET_SCO_CODEC_CAPABILITIES	0x0100
++#define MGMT_SCO_CODEC_CVSD			0x1
++#define MGMT_SCO_CODEC_MSBC_TRANSPARENT		0x2
++#define MGMT_SCO_CODEC_MSBC			0x3
++
++struct mgmt_cp_get_codec_capabilities {
++	__le16	hci_id;
++} __packed;
++#define MGMT_GET_SCO_CODEC_CAPABILITIES_SIZE	2
++
++struct mgmt_rp_get_codec_capabilities {
++	__le16	hci_id;
++	__u8	transparent_wbs_supported;
++	/* Non-zero selects a controller offload data path. */
++	__u8	hci_data_path_id;
++	__le32	wbs_pkt_len;
++} __packed;
++
++#define MGMT_OP_NOTIFY_SCO_CONNECTION_CHANGE	0x0101
++struct mgmt_cp_notify_sco_connection_change {
++	__le16			hci_id;
++	struct mgmt_addr_info	addr;
++	__u8			connected;
++	__u8			codec;
++} __packed;
++#define MGMT_NOTIFY_SCO_CONNECTION_CHANGE_SIZE	11
++
+ #define MGMT_EV_CMD_COMPLETE		0x0001
+ struct mgmt_ev_cmd_complete {
+ 	__le16	opcode;
+diff --git a/net/bluetooth/mgmt.c b/net/bluetooth/mgmt.c
+--- a/net/bluetooth/mgmt.c
++++ b/net/bluetooth/mgmt.c
+@@ -133,6 +133,8 @@
+ 	MGMT_OP_MESH_SEND,
+ 	MGMT_OP_MESH_SEND_CANCEL,
+ 	MGMT_OP_HCI_CMD_SYNC,
++	MGMT_OP_GET_SCO_CODEC_CAPABILITIES,
++	MGMT_OP_NOTIFY_SCO_CONNECTION_CHANGE,
+ };
+ 
+ static const u16 mgmt_events[] = {
+@@ -9317,6 +9319,74 @@
+ 				 MGMT_STATUS_SUCCESS, &rp, sizeof(rp));
+ }
+ 
++static int floss_get_sco_codec_capabilities(struct sock *sk,
++					    struct hci_dev *hdev,
++					    void *data, u16 data_len)
++{
++	struct mgmt_cp_get_codec_capabilities *cp = data;
++	struct mgmt_rp_get_codec_capabilities rp;
++	int err;
++
++	hdev = hci_dev_get(__le16_to_cpu(cp->hci_id));
++	if (!hdev)
++		return -EINVAL;
++
++	rp.hci_id = cpu_to_le16(hdev->id);
++	rp.transparent_wbs_supported =
++		hci_test_quirk(hdev, HCI_QUIRK_WIDEBAND_SPEECH_SUPPORTED);
++	rp.hci_data_path_id = 0;
++	if (hdev->get_data_path_id)
++		hdev->get_data_path_id(hdev, &rp.hci_data_path_id);
++	rp.wbs_pkt_len = cpu_to_le32(hdev->wbs_pkt_len);
++
++	err = mgmt_cmd_complete(sk, MGMT_INDEX_NONE,
++				MGMT_OP_GET_SCO_CODEC_CAPABILITIES,
++				MGMT_STATUS_SUCCESS, &rp, sizeof(rp));
++	hci_dev_put(hdev);
++	return err;
++}
++
++static int floss_notify_sco_connection_change(struct sock *sk,
++					      struct hci_dev *hdev,
++					      void *data, u16 data_len)
++{
++	struct mgmt_cp_notify_sco_connection_change *cp = data;
++	struct hci_conn *conn;
++	int notify;
++
++	hdev = hci_dev_get(__le16_to_cpu(cp->hci_id));
++	if (!hdev)
++		return -EINVAL;
++
++	if (!hdev->notify) {
++		hci_dev_put(hdev);
++		return 0;
++	}
++
++	hci_dev_lock(hdev);
++	conn = hci_conn_hash_lookup_ba(hdev, SCO_LINK, &cp->addr.bdaddr);
++	if (cp->connected && !conn) {
++		conn = hci_conn_add_unset(hdev, SCO_LINK, &cp->addr.bdaddr, 0);
++		if (IS_ERR(conn)) {
++			hci_dev_unlock(hdev);
++			hci_dev_put(hdev);
++			return PTR_ERR(conn);
++		}
++
++		notify = cp->codec == MGMT_SCO_CODEC_MSBC_TRANSPARENT ?
++			 HCI_NOTIFY_ENABLE_SCO_TRANSP :
++			 HCI_NOTIFY_ENABLE_SCO_CVSD;
++		hdev->notify(hdev, notify);
++	} else if (!cp->connected && conn) {
++		hci_conn_del(conn);
++		hdev->notify(hdev, HCI_NOTIFY_DISABLE_SCO);
++	}
++	hci_dev_unlock(hdev);
++	hci_dev_put(hdev);
++
++	return 0;
++}
++
+ static const struct hci_mgmt_handler mgmt_handlers[] = {
+ 	{ NULL }, /* 0x0000 (no command) */
+ 	{ read_version,            MGMT_READ_VERSION_SIZE,
+@@ -9450,6 +9520,20 @@
+ 						HCI_MGMT_VAR_LEN },
+ 	{ mesh_send_cancel,        MGMT_MESH_SEND_CANCEL_SIZE },
+ 	{ mgmt_hci_cmd_sync,       MGMT_HCI_CMD_SYNC_SIZE, HCI_MGMT_VAR_LEN },
++
++	/* Floss commands intentionally start at 0x0100 to avoid collisions with
++	 * future upstream management commands.
++	 */
++	[MGMT_OP_GET_SCO_CODEC_CAPABILITIES] = {
++		floss_get_sco_codec_capabilities,
++		MGMT_GET_SCO_CODEC_CAPABILITIES_SIZE,
++		HCI_MGMT_NO_HDEV,
++	},
++	{
++		floss_notify_sco_connection_change,
++		MGMT_NOTIFY_SCO_CONNECTION_CHANGE_SIZE,
++		HCI_MGMT_NO_HDEV,
++	},
+ };
+ 
+ void mgmt_index_added(struct hci_dev *hdev)
+diff --git a/drivers/bluetooth/btusb.c b/drivers/bluetooth/btusb.c
+--- a/drivers/bluetooth/btusb.c
++++ b/drivers/bluetooth/btusb.c
+@@ -902,6 +902,13 @@
+ #define BTUSB_ALT6_CONTINUOUS_TX	16
+ #define BTUSB_HW_SSR_ACTIVE	17
+ 
++/* HCI SCO payload per USB alternate setting. Alternate settings 1-5 carry
++ * three USB packets per HCI packet; alternate setting 6 carries one.
++ */
++static const unsigned int hci_packet_size_usb_alt[] = {
++	0, 24, 48, 72, 96, 144, 60,
++};
++
+ struct btusb_data {
+ 	struct hci_dev       *hdev;
+ 	struct usb_device    *udev;
+@@ -4257,6 +4264,9 @@
+ 		/* Interface orders are hardcoded in the specification */
+ 		data->isoc = usb_ifnum_to_if(data->udev, ifnum_base + 1);
+ 		data->isoc_ifnum = ifnum_base + 1;
++		hdev->wbs_pkt_len =
++			hci_packet_size_usb_alt[btusb_find_altsetting(data, 6) ? 6 :
++						 btusb_find_altsetting(data, 3) ? 3 : 1];
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_BT_HCIBTUSB_RTL) &&
+-- 
+2.46.0

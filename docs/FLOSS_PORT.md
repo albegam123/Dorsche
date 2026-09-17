@@ -101,30 +101,19 @@ the unmodified D-Bus policy and systemd units under
 `.cache/floss/staging/bt` and applies the narrowly scoped patches recorded in
 `scripts/floss/patches/`. The first patch pins the Rust `cxx` crate to the same
 1.0.94 ABI as AOSP's `cxxbridge` generator and enables two dependency features
-normally supplied by ChromiumOS's vendored Rust graph. The second patch
-currently exposes Linux 6.18's upstream `HCI_DRV_PKT` transport through the
-existing host HCI user socket. Its direct switch-altsetting command is a
-temporary bring-up mechanism, not the target architecture. The target command
-reports only SCO connection state and codec; `btusb` owns descriptor, MTU,
-bandwidth, and quirk policy. The imported `third_party/floss` tree is never
-patched and remains verifiable byte-for-byte.
+normally supplied by ChromiumOS's vendored Rust graph. No Floss source patch
+selects USB transport parameters. The imported `third_party/floss` tree is
+never patched and remains verifiable byte-for-byte.
 
-The legacy direct-switch path defaults off. Enable it only for controlled Linux
-6.18 diagnostics, never for automatic controller selection:
-
-```ini
-bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
-```
-
-That gate preserves the behavior of older kernels. Any configured altsetting
-and packet size are diagnostic assertions only. They must not be inferred from
-VID:PID or installed by the runtime. The command must be sent by Floss because its
-`HCI_CHANNEL_USER` socket exclusively owns the controller; a sidecar process
-or external kernel module would violate that ownership model.
-
-Linux 6.18 already marks supported devices with kernel-owned WBS and transport
-flags. Those flags and USB descriptors belong inside `btusb`; they are not an
-API for Floss or Dorsche.
+Pristine Floss uses the ChromiumOS management operations
+`MGMT_OP_GET_SCO_CODEC_CAPABILITIES` (`0x0100`) and
+`MGMT_OP_NOTIFY_SCO_CONNECTION_CHANGE` (`0x0101`). Mainline Linux 6.18 does
+not include them, so `kernel/patches/0002-bluetooth-add-floss-userspace-sco.patch`
+ports the official ChromeOS 6.12 implementation. Floss reports only SCO state
+and codec. `btusb_work()` retains ownership of USB descriptor, SCO MTU,
+alternate-setting, and kernel quirk policy. This is necessary because Floss's
+`HCI_CHANNEL_USER` socket owns the controller and the kernel cannot otherwise
+observe its SCO HCI connection lifecycle.
 
 The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresses
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream

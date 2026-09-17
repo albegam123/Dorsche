@@ -62,8 +62,6 @@ ensure_host_overlay() {
   patch --directory="$overlay" --strip=1 \
     < "$root/scripts/floss/patches/0001-syn-extra-traits.patch"
   patch --directory="$overlay" --strip=1 \
-    < "$root/scripts/floss/patches/0002-linux-hci-driver-altsetting.patch"
-  patch --directory="$overlay" --strip=1 \
     < "$root/scripts/floss/patches/0003-remove-unused-grpc.patch"
   printf '%s\n' "$overlay_id" > "$overlay/.dorsche-host-overlay"
   rm -rf "$staged"

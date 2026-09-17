@@ -166,29 +166,22 @@ CVSD or transparent mSBC, then a codec-aware Linux driver notification lets
 controller SCO MTU, and kernel-owned quirks. In particular, no Dorsche table
 maps USB VID:PID values to transport parameters.
 
-The current Linux 6.18 compatibility switch below predates that codec-aware
-interface. It directly selects a USB layout and is retained only as an
-explicit, default-off diagnostic escape hatch while bringing up the kernel
-interface; it is not production controller policy:
+Mainline Linux 6.18 lacks the two ChromiumOS management operations used by
+pristine Floss for that notification. Apply Dorsche's port of the official
+ChromiumOS interface together with the SCO teardown fix:
 
-```ini
-[Sysprops]
-bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
-bluetooth.hfp.linux_hci_driver_msbc_altsetting=1
-bluetooth.hfp.linux_hci_driver_msbc_packet_size=48
+```bash
+git -C /path/to/linux apply \
+  /path/to/Dorsche/kernel/patches/0001-bluetooth-btusb-serialize-sco-tx-altsetting.patch
+git -C /path/to/linux apply \
+  /path/to/Dorsche/kernel/patches/0002-bluetooth-add-floss-userspace-sco.patch
 ```
 
-For example, one hardware investigation temporarily used:
-
-```ini
-bluetooth.hfp.linux_hci_driver_msbc_altsetting=3
-bluetooth.hfp.linux_hci_driver_msbc_packet_size=72
-```
-
-Do not install those values as controller detection or normal startup policy.
-On Linux 6.18, btusb may log one
-`EMSGSIZE (90)` while changing
-back to altsetting 0 because the driver does not cancel its SCO TX anchor before
+No Floss sysprop, sidecar, or Rust resolver selects a USB layout. A controller
+that the kernel does not mark WBS-capable stays on CVSD rather than being
+force-enabled. On an unpatched Linux 6.18 kernel, btusb may log one
+`EMSGSIZE (90)` while changing back to altsetting 0 because the driver does not
+cancel its SCO TX anchor before
 `usb_set_interface`; this occurs after the full-duplex stream has completed and
 is distinct from a packet-size mismatch or kernel oops.
 

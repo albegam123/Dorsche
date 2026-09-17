@@ -176,13 +176,19 @@ A later run replaced the CSR controller with Realtek RTL8761BU `2b89:8761`
 data but marked all 1,064 decoded mSBC frames lost, yielding all-zero uplink
 PCM. Linux 6.18 sets `BTUSB_USE_ALT3_FOR_WBS` on Realtek devices. Matching that
 policy with altsetting 3 changed the controller's HCI SCO packet layout to 72
-bytes, so the final verified configuration is:
+bytes. At that point in the investigation, before the ChromiumOS userspace-SCO
+kernel interface was ported, the temporary verified configuration was:
 
 ```ini
 bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
 bluetooth.hfp.linux_hci_driver_msbc_altsetting=3
 bluetooth.hfp.linux_hci_driver_msbc_packet_size=72
 ```
+
+This configuration is historical evidence, not current deployment guidance.
+It has been removed from Dorsche. The production path uses the codec-aware
+kernel MGMT interface, after which `btusb` selects altsetting 3 and reports the
+72-byte WBS packet length without any userspace VID:PID or USB-layout policy.
 
 An eight-second 440-Hz reference/downlink run then sent 256,000 bytes and
 captured 255,120 bytes of nonzero uplink PCM. Floss decoded 1,063 frames with a
