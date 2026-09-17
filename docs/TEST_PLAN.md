@@ -72,7 +72,11 @@ exclusive-ownership, permissions, or daemon-startup issues—not audio issues.
    p50/p95/p99; record channel queue depth and dropped-frame counters.
 3. During playback, inject speech plus the synchronized echo-reference track;
    require prompt playback cancellation without false triggers from self-audio.
-4. Stress full duplex for one hour with CPU pressure, USB reset, headset roam,
+4. Run the HFP smoke tool with `--loopback-delay-seconds 10`; verify ten seconds
+   of initial downlink silence, simultaneous capture while delayed speech is
+   audible, a clock-paced tail, and clean SCO shutdown. This separates transport
+   duplex behavior from a headset DSP suppressing immediate acoustic echo.
+5. Stress full duplex for one hour with CPU pressure, USB reset, headset roam,
    and PipeWire graph restart.
 
 ### P4: LE Audio software unicast

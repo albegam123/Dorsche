@@ -138,6 +138,20 @@ cargo run --bin floss_hfp_smoke -- \
 path uses a bounded Tokio channel and transfers frame ownership between the SCO
 uplink/downlink tasks without an audio-path mutex.
 
+For an unmistakable full-duplex demonstration, delay the microphone return by
+10 seconds:
+
+```bash
+cargo run --bin floss_hfp_smoke -- \
+  --address F0:BE:25:79:62:A4 --seconds 15 --codec msbc \
+  --loopback --loopback-delay-seconds 10 --loopback-gain 0.60
+```
+
+The first 10 seconds of downlink are silence while uplink capture remains
+active. Playback then emits audio from exactly 10 seconds earlier while capture
+continues. The delayed tail is drained at the PCM clock rate, so this example
+runs for approximately 25 seconds rather than truncating the last 10 seconds.
+
 Once CVSD is stable, select wide-band 16-kHz mSBC explicitly:
 
 ```bash

@@ -93,6 +93,7 @@ struct Args {
     frequency_hz: f32,
     loopback: bool,
     loopback_gain: f32,
+    loopback_delay_seconds: u64,
     capture_path: Option<PathBuf>,
     codec: Codec,
 }
@@ -106,6 +107,7 @@ impl Args {
             frequency_hz: 440.0,
             loopback: false,
             loopback_gain: 0.35,
+            loopback_delay_seconds: 0,
             capture_path: None,
             codec: Codec::Cvsd,
         };
@@ -120,6 +122,9 @@ impl Args {
                 "--loopback-gain" => {
                     parsed.loopback_gain = args.next().ok_or_else(value)?.parse()?
                 }
+                "--loopback-delay-seconds" => {
+                    parsed.loopback_delay_seconds = args.next().ok_or_else(value)?.parse()?
+                }
                 "--capture" => {
                     parsed.capture_path = Some(PathBuf::from(args.next().ok_or_else(value)?))
                 }
@@ -128,7 +133,8 @@ impl Args {
                     println!(
                         "Usage: floss_hfp_smoke --address XX:XX:XX:XX:XX:XX \
                          [--seconds 5] [--codec cvsd|msbc] [--frequency 440] \
-                         [--loopback [--loopback-gain 0.35]] [--capture FILE]"
+                         [--loopback [--loopback-gain 0.35] \
+                         [--loopback-delay-seconds 10]] [--capture FILE]"
                     );
                     std::process::exit(0);
                 }
@@ -147,6 +153,12 @@ impl Args {
             || parsed.loopback_gain > 1.0
         {
             bail!("--loopback-gain must be in (0.0, 1.0]");
+        }
+        if parsed.loopback_delay_seconds > 60 {
+            bail!("--loopback-delay-seconds must not exceed 60");
+        }
+        if parsed.loopback_delay_seconds != 0 && !parsed.loopback {
+            bail!("--loopback-delay-seconds requires --loopback");
         }
         Ok(parsed)
     }
@@ -278,20 +290,37 @@ async fn exercise_loopback(
     args: &Args,
 ) -> Result<(u64, CaptureStats, Vec<u8>)> {
     let (mut reader, mut writer) = stream.into_split();
-    let deadline = Instant::now() + Duration::from_secs(args.seconds);
+    let capture_deadline = Instant::now() + Duration::from_secs(args.seconds);
+    let drain_deadline = capture_deadline + Duration::from_secs(args.loopback_delay_seconds);
     let gain = args.loopback_gain;
+    let delay_seconds = args.loopback_delay_seconds;
+    let sample_rate = args.codec.sample_rate();
     // Eight small SCO reads bound latency and memory. If downlink ever stalls,
     // backpressure reaches capture instead of growing an unbounded audio queue.
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(8);
 
     let capture = async move {
+        let mut tx = Some(tx);
         let mut stats = CaptureStats::default();
         let mut captured_pcm =
             Vec::with_capacity(args.codec.sample_rate() * size_of::<i16>() * args.seconds as usize);
         let mut buffer = [0_u8; 640];
         loop {
+            // Closing the reader when capture ends also tears down Floss's
+            // bidirectional UIPC endpoint. Keep consuming (but not recording)
+            // uplink while playback drains the delayed tail.
+            let phase_deadline = if tx.is_some() {
+                capture_deadline
+            } else {
+                drain_deadline
+            };
             let read = tokio::select! {
-                _ = tokio::time::sleep_until(deadline) => break,
+                _ = tokio::time::sleep_until(phase_deadline) => {
+                    if tx.take().is_some() && phase_deadline < drain_deadline {
+                        continue;
+                    }
+                    break;
+                },
                 result = reader.read(&mut buffer) => {
                     result.context("read SCO microphone PCM")?
                 }
@@ -299,14 +328,25 @@ async fn exercise_loopback(
             if read == 0 {
                 break;
             }
+            if Instant::now() >= capture_deadline {
+                tx.take();
+                continue;
+            }
             stats.account(&buffer[..read]);
             captured_pcm.extend_from_slice(&buffer[..read]);
             // Ownership, rather than a shared mutable buffer, crosses from the
             // uplink task to the downlink task. No lock is on the audio path.
             let frame = buffer[..read].to_vec();
+            let sender = tx
+                .as_ref()
+                .expect("sender exists before capture deadline")
+                .clone();
             tokio::select! {
-                _ = tokio::time::sleep_until(deadline) => break,
-                result = tx.send(frame) => {
+                _ = tokio::time::sleep_until(capture_deadline) => {
+                    tx.take();
+                    continue;
+                },
+                result = sender.send(frame) => {
                     if result.is_err() {
                         break;
                     }
@@ -318,6 +358,13 @@ async fn exercise_loopback(
 
     let playback = async move {
         let mut bytes = 0_u64;
+        // A fixed-size circular delay line makes the demo deterministic: every
+        // captured byte replaces and emits the byte from exactly N seconds
+        // earlier. Initial zeroes keep SCO downlink serviced while the history
+        // fills, so this remains a real simultaneous uplink/downlink test.
+        let delay_bytes = sample_rate * size_of::<i16>() * delay_seconds as usize;
+        let mut delay_line = vec![0_u8; delay_bytes];
+        let mut delay_cursor = 0_usize;
         while let Some(mut frame) = rx.recv().await {
             // Attenuate before echoing microphone PCM. Acoustic leakage plus a
             // unity-gain software loop can otherwise become a positive-feedback
@@ -330,11 +377,48 @@ async fn exercise_loopback(
                     as i16;
                 sample.copy_from_slice(&output.to_le_bytes());
             }
+            if !delay_line.is_empty() {
+                for byte in &mut frame {
+                    std::mem::swap(byte, &mut delay_line[delay_cursor]);
+                    delay_cursor += 1;
+                    if delay_cursor == delay_line.len() {
+                        delay_cursor = 0;
+                    }
+                }
+            }
             writer
                 .write_all(&frame)
                 .await
                 .context("echo SCO microphone PCM to headset")?;
             bytes += frame.len() as u64;
+        }
+
+        // Capture has ended, but the last N seconds are still in the ring.
+        // Drain at the PCM clock rate instead of bursting into the UIPC socket;
+        // `--seconds 20 --loopback-delay-seconds 10` therefore lasts ~30 s.
+        if !delay_line.is_empty() {
+            let frame_bytes = sample_rate / 100 * size_of::<i16>();
+            let mut ticker = interval_at(Instant::now() + FRAME_TIME, FRAME_TIME);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+            let mut remaining = delay_line.len();
+            let mut frame = vec![0_u8; frame_bytes];
+            while remaining != 0 {
+                ticker.tick().await;
+                let length = remaining.min(frame_bytes);
+                for byte in &mut frame[..length] {
+                    *byte = delay_line[delay_cursor];
+                    delay_cursor += 1;
+                    if delay_cursor == delay_line.len() {
+                        delay_cursor = 0;
+                    }
+                }
+                writer
+                    .write_all(&frame[..length])
+                    .await
+                    .context("drain delayed SCO microphone PCM")?;
+                bytes += length as u64;
+                remaining -= length;
+            }
         }
         writer.shutdown().await.context("close SCO loopback half")?;
         Ok::<_, anyhow::Error>(bytes)
@@ -391,16 +475,26 @@ async fn main() -> Result<()> {
                 args.codec.name()
             );
         }
+        let mode = if args.loopback_delay_seconds != 0 {
+            format!(
+                "delayed-mic-loopback/{}s",
+                args.loopback_delay_seconds
+            )
+        } else if args.loopback {
+            "mic-loopback".to_owned()
+        } else {
+            "reference-tone".to_owned()
+        };
         println!(
             "SCO started: {} {} Hz/S16LE/mono, mode={}",
             args.codec.name(),
             args.codec.sample_rate(),
-            if args.loopback { "mic-loopback" } else { "reference-tone" }
+            mode
         );
 
         let data = connect_sco_uipc().await?;
         let (played, captured, captured_pcm) = timeout(
-            Duration::from_secs(args.seconds + 5),
+            Duration::from_secs(args.seconds + args.loopback_delay_seconds + 5),
             async {
                 if args.loopback {
                     exercise_loopback(data, &args).await
@@ -437,7 +531,7 @@ async fn main() -> Result<()> {
 
     let stop_result = stop_sco(&media, &args.address).await;
     match (test_result, stop_result) {
-        (Ok(()), Ok(status)) if status == 0 => {
+        (Ok(()), Ok(0)) => {
             println!("SCO stopped cleanly");
             Ok(())
         }
