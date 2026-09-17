@@ -28,11 +28,16 @@ BlueZ and Floss cannot own the same `hciN` simultaneously.
 
 1. Verify the pristine source hash with `scripts/floss/verify-source.sh`.
 2. Build release `btadapterd`, `btmanagerd`, and `btclient`.
-3. Confirm the USB device, `btusb` binding, and `/sys/class/bluetooth/hci0`.
+3. Confirm the USB device, `btusb` binding, and at least one kernel `hciN`.
 4. Stop `bluetooth.service`; prove no `bluetoothd` process owns the controller.
-5. Start `btadapterd --hci=0`; require successful HCI Reset and controller-info
-   read with no command timeout.
+5. Start `btmanagerd`; require it to map the physical `hciN` to a stable virtual
+   index and launch `btadapterd@<virtual>_<real>.service` with matching
+   `--index` and `--hci` arguments. Require successful HCI Reset and
+   controller-info read with no command timeout.
 6. Require `org.chromium.bluetooth` and the adapter object on system D-Bus.
+7. Simulate one remove/add cycle; require the adapter service to stop and
+   restart automatically while the virtual index and D-Bus object path remain
+   stable even if the physical `hciN` changes.
 
 P0 blocks everything else. Failures here are controller/driver/firmware,
 exclusive-ownership, permissions, or daemon-startup issues—not audio issues.

@@ -202,6 +202,28 @@ journal are retained under `out/classic-audio-*`. A D-Bus `Connect` return is
 not treated as success: the script waits for the headset to appear in
 `GetConnectedDevices` and aborts the audio matrix if paging times out.
 
+### Adapter hotplug and stable identity
+
+Production starts `btmanagerd.service`, not a hard-coded
+`btadapterd --hci=N`. The upstream manager watches kernel MGMT index add/remove
+events and maps each stable sysfs device path to a virtual Floss adapter index.
+Its systemd instance contains both identities: for example,
+`btadapterd@0_4.service` means virtual adapter 0 currently uses physical
+`hci4`.
+
+Dorsche's systemd drop-in preserves that pair as `--index=0 --hci=4` and leaves
+the readiness PID file intact. Replugging the same USB path may produce a new
+physical hci number without changing the D-Bus adapter identity. Enable the
+manager once after installing the runtime:
+
+```bash
+sudo systemctl disable --now bluetooth.service
+sudo systemctl enable --now btmanagerd.service
+```
+
+Do not manually enable a `btadapterd@...` instance; `btmanagerd` owns its
+lifecycle, restart recovery, and default-adapter fallback.
+
 ### Floss dependency policy
 
 Dorsche keeps the complete Floss Bluetooth protocol/profile implementation,

@@ -41,6 +41,8 @@ install -D -m 0755 "$hfp_smoke" \
   /usr/libexec/bluetooth/floss_hfp_smoke
 install -D -m 0755 "$root/scripts/floss/classic-audio-diag.sh" \
   /usr/local/sbin/dorsche-classic-audio-diag
+install -D -m 0755 "$root/scripts/floss/launch-adapter.sh" \
+  /usr/libexec/bluetooth/dorsche-btadapterd-launch
 install -D -m 0644 \
   "$package/etc/dbus-1/system.d/org.chromium.bluetooth.conf" \
   /etc/dbus-1/system.d/org.chromium.bluetooth.conf

@@ -25,6 +25,12 @@ else
   fail 'Floss D-Bus policy is absent; run scripts/floss/install-runtime.sh after building'
 fi
 
+if [[ -x /usr/libexec/bluetooth/dorsche-btadapterd-launch ]]; then
+  ok 'virtual/real HCI systemd launcher is installed'
+else
+  fail 'virtual/real HCI launcher is absent; run scripts/floss/install-runtime.sh'
+fi
+
 if compgen -G '/sys/class/bluetooth/hci*' >/dev/null; then
   for adapter in /sys/class/bluetooth/hci*; do
     ok "Bluetooth controller $(basename "$adapter")"
@@ -37,6 +43,12 @@ if pgrep -x bluetoothd >/dev/null; then
   fail 'BlueZ bluetoothd owns the controller; stop it before running Floss'
 else
   ok 'BlueZ bluetoothd is not running'
+fi
+
+if systemctl is-enabled btmanagerd.service >/dev/null 2>&1; then
+  ok 'btmanagerd is enabled for controller hotplug management'
+else
+  warn 'btmanagerd is not enabled; adapters will not be managed after boot'
 fi
 
 if [[ -x "$state/output/release/btadapterd" ]]; then

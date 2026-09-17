@@ -60,7 +60,9 @@ Journal evidence included:
 D-Bus calls returned controller address `00:1A:7D:DA:71:13`,
 `StartDiscovery=true`, and `IsDiscovering=true`. The journal recorded multiple
 remote inquiry results. `CancelDiscovery=true` returned the controller to
-`IsDiscovering=false` while `btadapterd@0.service` remained active.
+`IsDiscovering=false` while the manually started adapter daemon remained
+active. This predates the later `<virtual>_<real>` systemd integration described
+below.
 
 ## Classic headset and A2DP result
 
@@ -168,6 +170,18 @@ new kernel message or oops. An eight-second A2DP/SBC regression then sent
 and likewise added no kernel message. The user's original kernel source tree
 was never modified. RF-loss recovery and long-duration soak remain separate
 tests.
+
+### Controller hotplug result
+
+The production `btmanagerd` path was later validated with the RTL8761BU. With
+the controller initially registered as physical `hci4`, the manager launched
+`btadapterd@0_4.service` as `--index=0 --hci=4`. Unbinding and rebinding the
+same USB interface removed the adapter process and caused the kernel to
+re-register it as physical `hci0`; btmanagerd then launched
+`btadapterd@0_0.service` as `--index=0 --hci=0`. `GetDefaultAdapter` remained
+virtual index 0 throughout, and the readiness file remained
+`bluetooth0.pid`. This demonstrates stable userspace identity without a
+hard-coded physical hci number or controller VID:PID policy.
 
 ### Realtek RTL8761BU WBS result
 

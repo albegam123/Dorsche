@@ -78,9 +78,12 @@ cannot be owned by BlueZ and Floss simultaneously.
 
 ```bash
 scripts/floss/preflight.sh
-sudo systemctl stop bluetooth.service
-sudo scripts/floss/run-adapter.sh 0
+sudo systemctl disable --now bluetooth.service
+sudo systemctl enable --now btmanagerd.service
 ```
+
+For isolated daemon debugging only, bypass the manager with
+`sudo scripts/floss/run-adapter.sh <real_hci> <virtual_hci>`.
 
 In another terminal, verify the real daemon rather than just socket creation:
 
@@ -137,6 +140,13 @@ supplementary group of `btadapterd`. This lets the daemon assign its A2DP/SCO
 UIPC sockets to the intended group without broadening its upstream capability
 bounding set. Rust audio clients use Tokio-native `zbus` for control methods and
 SCM_RIGHTS FD transfer; no C-style D-Bus glue is needed.
+
+The same drop-in fixes the Linux package's adapter-instance boundary.
+`btmanagerd` emits `<virtual_hci>_<real_hci>` systemd instances, while the
+packaged unit passes the unsplit instance as `--hci` and deletes the readiness
+PID in `ExecStartPost`. `dorsche-btadapterd-launch` validates and splits the
+pair, passes both `--index` and `--hci`, and lets btadapterd own the PID lifetime.
+No controller identity or transport policy is evaluated by the launcher.
 
 ## Linux audio-server direction
 

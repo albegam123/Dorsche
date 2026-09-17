@@ -4,10 +4,15 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 state="${DORSCHE_FLOSS_STATE:-$root/.cache/floss}"
 hci="${1:-0}"
+virtual_hci="${2:-0}"
 binary="${DORSCHE_BTADAPTERD:-$state/output/release/btadapterd}"
 
 [[ "$hci" =~ ^[0-9]+$ ]] || {
   printf 'HCI index must be numeric.\n' >&2
+  exit 2
+}
+[[ "$virtual_hci" =~ ^[0-9]+$ ]] || {
+  printf 'Virtual HCI index must be numeric.\n' >&2
   exit 2
 }
 [[ -x "$binary" ]] || {
@@ -35,4 +40,4 @@ fi
 # Optional daemon switches such as `--debug --log-output=stderr` may be supplied
 # as a whitespace-separated development override.
 read -r -a extra_args <<< "${DORSCHE_BTADAPTERD_ARGS:-}"
-exec "$binary" --hci="$hci" "${extra_args[@]}"
+exec "$binary" --index="$virtual_hci" --hci="$hci" "${extra_args[@]}"
