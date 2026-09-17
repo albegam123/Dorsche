@@ -130,6 +130,13 @@ RTL8761BU `2b89:8761` therefore uses mSBC altsetting 3 and 72-byte packets. The
 generic default remains altsetting 1 so this host overlay does not silently
 change other controllers.
 
+Production startup runs `dorsche-controller-quirks` as a narrowly privileged
+systemd `ExecStartPre`. The resolver walks from `/sys/class/bluetooth/hciN/device`
+to the owning USB device, selects a reviewed VID:PID entry, and atomically
+updates the altsetting/packet-size pair before Floss reads sysprops. Unknown and
+non-USB transports are left untouched and do not block startup. The resolver
+never enables the Linux HCI driver-command gate by itself.
+
 The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresses
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream
 `-Werror` checks remain active.
@@ -146,7 +153,8 @@ only the Android-specific `LE_GET_VENDOR_CAPABILITIES` probe; standard USB HCI
 controllers are not required to implement that vendor opcode. Existing host
 configuration is never overwritten.
 
-The installer also adds a systemd drop-in making `bluetooth-audio` a
+The installer also builds/installs the resolver and Classic audio smoke tools,
+then adds a systemd drop-in making `bluetooth-audio` a
 supplementary group of `btadapterd`. This lets the daemon assign its A2DP/SCO
 UIPC sockets to the intended group without broadening its upstream capability
 bounding set. Rust audio clients use Tokio-native `zbus` for control methods and

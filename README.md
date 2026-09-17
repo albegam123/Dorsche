@@ -79,6 +79,8 @@ src/topshim/frame.rs       fd/fence adoption and mapped frame lease
 src/topshim/actors.rs      four message-passing actors and priority tracks
 src/bin/floss_audio_smoke.rs  native zbus + Floss UIPC A2DP hardware smoke test
 src/bin/floss_hfp_smoke.rs    native zbus + full-duplex CVSD/SCO hardware smoke test
+src/bin/dorsche_controller_quirks.rs  USB HFP transport-pair resolver
+scripts/floss/classic-audio-diag.sh   repeatable Classic audio diagnostics/soak
 ```
 
 ## Run
@@ -190,6 +192,34 @@ invalid values retain safe defaults. On Linux 6.18, btusb may log one
 back to altsetting 0 because the driver does not cancel its SCO TX anchor before
 `usb_set_interface`; this occurs after the full-duplex stream has completed and
 is distinct from a packet-size mismatch or kernel oops.
+
+The installed `dorsche-controller-quirks` helper resolves these pairs from the
+physical `hciN` sysfs ancestry before `btadapterd` starts. It changes only the
+two mSBC transport keys for known VID:PID entries, preserves file ownership and
+mode with an atomic replacement, and is idempotent. It deliberately does not
+enable `bluetooth.hfp.linux_hci_driver_altsetting.enabled`; kernel-path opt-in
+remains an administrator decision. Dry-run it with:
+
+```bash
+target/release/dorsche_controller_quirks --hci 4
+```
+
+Run the complete Classic audio diagnostic once, or turn it into a soak with a
+larger cycle count:
+
+```bash
+sudo scripts/floss/classic-audio-diag.sh \
+  --address F0:BE:25:79:62:A4 --hci 4 --cycles 1 --seconds 5
+
+sudo scripts/floss/classic-audio-diag.sh \
+  --address F0:BE:25:79:62:A4 --hci 4 --cycles 100 --seconds 10 --no-delayed
+```
+
+Every case is independently marked PASS/FAIL. Raw PCM, controller metadata,
+USB topology, sysprops, connected devices, packet-loss summaries and the daemon
+journal are retained under `out/classic-audio-*`. A D-Bus `Connect` return is
+not treated as success: the script waits for the headset to appear in
+`GetConnectedDevices` and aborts the audio matrix if paging times out.
 
 ### Floss dependency policy
 

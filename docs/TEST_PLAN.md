@@ -108,3 +108,14 @@ Floss revision, Dorsche commit, D-Bus method results, daemon journal, btsnoop/HC
 trace, negotiated codecs, and latency/underrun/drop metrics. A test is not
 "passed" merely because a process started; each phase requires observable HCI,
 D-Bus, profile, and audio-plane evidence.
+
+The repeatable P2 entry point is:
+
+```bash
+sudo scripts/floss/classic-audio-diag.sh \
+  --address XX:XX:XX:XX:XX:XX --hci N --cycles 1 --seconds 5
+```
+
+Use `--cycles 100 --no-delayed` for unattended soak after the interactive
+delayed-loopback case passes. A headset page timeout is a connection failure;
+the tool retains the journal and skips misleading downstream audio attempts.

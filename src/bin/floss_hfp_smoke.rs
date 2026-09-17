@@ -515,6 +515,9 @@ async fn main() -> Result<()> {
         if captured.bytes == 0 {
             bail!("SCO uplink produced no microphone PCM");
         }
+        if captured.samples == 0 || captured.peak == 0 {
+            bail!("SCO uplink produced only zero-valued microphone PCM");
+        }
         if let Some(path) = &args.capture_path {
             std::fs::write(path, &captured_pcm)
                 .with_context(|| format!("write captured PCM to {}", path.display()))?;
