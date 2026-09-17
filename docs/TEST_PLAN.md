@@ -72,11 +72,27 @@ exclusive-ownership, permissions, or daemon-startup issues—not audio issues.
 4. Stress full duplex for one hour with CPU pressure, USB reset, headset roam,
    and PipeWire graph restart.
 
-### P4: future profiles and robustness
+### P4: LE Audio software unicast
 
-Test LE Audio CIS/BIS, multi-device policy, suspend/resume, controller hotplug,
-daemon crash recovery, malformed peer traffic, fuzz targets, and long-duration
-soak only after P0-P3 are repeatable.
+1. Require a Bluetooth 5.2+ controller whose kernel HCI interface exposes ISO
+   support and a real BAP/CAP unicast headset; the Classic HiTune T3 cannot
+   satisfy this phase.
+2. Discover the Floss group id, run `floss_le_audio_smoke` separately in output,
+   input and duplex modes, and retain HCI ISO traces.
+3. Verify negotiated sample rate, width, channel count and data interval against
+   PAC/ASE configuration. Reject a pass based only on socket traffic.
+4. Capture at least ten minutes of peer PCM and record RMS, peak, ring drops,
+   late frames, CIS packet loss and presentation-delay drift.
+5. Run `dorsche_pipewire --probe`, then expose source and sink nodes and verify
+   them with `pw-cli`, `pw-record` and `pw-play`.
+
+### P5: broadcast, offload and robustness
+
+Test BIS/Auracast, controller/DSP offload, multi-device policy, suspend/resume,
+controller hotplug, daemon crash recovery, malformed peer traffic, fuzz targets,
+and long-duration soak only after P0-P4 are repeatable. Broadcast and offload
+require positive provider capabilities; never enable them by changing only the
+Floss Linux HAL verifier booleans.
 
 ## Evidence to retain
 

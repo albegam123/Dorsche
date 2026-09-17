@@ -16,6 +16,13 @@ hardware plane is C++20; the ownership, scheduling, and graph plane is Rust on
 Tokio. It intentionally has no GStreamer dependency and no application-level
 `Mutex`/`RwLock`.
 
+The production wireless boundary is documented in
+[`docs/WIRELESS_AUDIO_ARCHITECTURE.md`](docs/WIRELESS_AUDIO_ARCHITECTURE.md).
+It includes a versioned LE Audio session ABI, ASE/LC3/ISO QoS and broadcast
+types, explicit software/offload capability selection, a metadata-preserving
+memfd SPSC data plane, Floss LE Audio unicast control, and an optional native
+PipeWire adapter.
+
 ```text
                       bounded Tokio mpsc edges
 

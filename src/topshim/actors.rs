@@ -138,13 +138,15 @@ pub enum PlaybackCommand {
     },
 }
 
-pub(crate) struct EchoReference {
+#[doc(hidden)]
+pub struct EchoReference {
     pcm: Arc<[f32]>,
     playback_sequence: u64,
     presentation_time_ns: u64,
 }
 
-pub(crate) struct BargeIn {
+#[doc(hidden)]
+pub struct BargeIn {
     microphone_sequence: u64,
 }
 

@@ -1,12 +1,9 @@
-mod bridge;
-mod topshim;
-
 use std::time::Duration;
 
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, watch};
 
-use topshim::{
+use dorsche::topshim::{
     PlaybackCommand, make_demo_utterance, run_controller_proxy, run_microphone_capture,
     run_playback_sink, run_vad_ai,
 };
