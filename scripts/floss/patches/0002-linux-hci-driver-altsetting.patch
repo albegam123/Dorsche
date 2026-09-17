@@ -77,11 +77,12 @@
  hci::LeScanningManager* GetScanning();
 --- a/system/gd/sysprops/sysprops_module.cc
 +++ b/system/gd/sysprops/sysprops_module.cc
-@@ -123,6 +123,8 @@
+@@ -123,6 +123,9 @@
            // SCO
            "bluetooth.sco.disable_enhanced_connection",
            "bluetooth.sco.swb_supported",
 +          "bluetooth.hfp.linux_hci_driver_altsetting.enabled",
++          "bluetooth.hfp.linux_hci_driver_msbc_altsetting",
 +          "bluetooth.hfp.linux_hci_driver_msbc_packet_size",
            // Profile
            "bluetooth.hid.wait_ms_after_uhid_open",
@@ -96,12 +97,14 @@
  #include "hci/controller_interface.h"
  #include "main/shim/entry.h"
  #include "osi/include/properties.h"
-@@ -83,6 +84,19 @@
+@@ -83,6 +84,21 @@
  
  #define MGMT_POLL_TIMEOUT_MS 2000
  
 +constexpr char kLinuxHciDriverAltsettingProperty[] =
 +        "bluetooth.hfp.linux_hci_driver_altsetting.enabled";
++constexpr char kLinuxHciDriverMsbcAltsettingProperty[] =
++        "bluetooth.hfp.linux_hci_driver_msbc_altsetting";
 +constexpr char kLinuxHciDriverMsbcPacketSizeProperty[] =
 +        "bluetooth.hfp.linux_hci_driver_msbc_packet_size";
 +
@@ -157,16 +160,29 @@
    for (const cached_codec_info& c : cached_codecs) {
      if (c.inner.codec == static_cast<uint64_t>(codec)) {
        return c.pkt_size;
-@@ -486,6 +522,18 @@
+@@ -486,6 +525,31 @@
              "Failed to notify HAL of connection change: hci {}, device {}, "
              "connected {}, codec {}",
              hci, device, is_connected, codec);
 +    if (osi_property_get_bool(kLinuxHciDriverAltsettingProperty, false)) {
 +      // CVSD with 16-bit host PCM uses altsetting 2 for one SCO link. The
 +      // transparent mSBC path uses altsetting 1 on generic USB controllers.
-+      const uint8_t altsetting = !is_connected ? 0
++      uint8_t altsetting = !is_connected ? 0
 +              : converted_codec == MGMT_SCO_CODEC_CVSD ? 2
 +                                                       : 1;
++      if (is_connected && converted_codec != MGMT_SCO_CODEC_CVSD) {
++        const int32_t configured_altsetting =
++                osi_property_get_int32(kLinuxHciDriverMsbcAltsettingProperty, 1);
++        // USB Bluetooth adapters expose controller-specific ISO bandwidth
++        // layouts. Linux itself selects alt 3 for Realtek WBS, while generic
++        // adapters normally use alt 1. Reject unsafe values instead of
++        // issuing an arbitrary usb_set_interface() request.
++        if (configured_altsetting >= 1 && configured_altsetting <= 6) {
++          altsetting = static_cast<uint8_t>(configured_altsetting);
++        } else {
++          bluetooth::log::warn("Ignoring invalid Linux mSBC altsetting {}", configured_altsetting);
++        }
++      }
 +      if (switch_linux_hci_driver_altsetting(altsetting)) {
 +        bluetooth::log::info("Queued Linux HCI driver altsetting {}", altsetting);
 +      } else {

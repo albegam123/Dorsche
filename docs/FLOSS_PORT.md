@@ -116,10 +116,19 @@ bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
 ```
 
 That gate preserves the behavior of older kernels. CVSD selects USB
-altsetting 2, transparent mSBC selects altsetting 1, and disconnect restores
-altsetting 0. The command must be sent by Floss because its
+altsetting 2. Transparent mSBC defaults to altsetting 1, while
+`bluetooth.hfp.linux_hci_driver_msbc_altsetting` selects a validated value from
+1 through 6 for controller-specific USB bandwidth layouts. The corresponding
+`bluetooth.hfp.linux_hci_driver_msbc_packet_size` must match the HCI SCO packet
+size exposed by that layout. Disconnect restores altsetting 0. The command must
+be sent by Floss because its
 `HCI_CHANNEL_USER` socket exclusively owns the controller; a sidecar process
 or external kernel module would violate that ownership model.
+
+Linux 6.18 marks Realtek btusb devices with `BTUSB_USE_ALT3_FOR_WBS`. The tested
+RTL8761BU `2b89:8761` therefore uses mSBC altsetting 3 and 72-byte packets. The
+generic default remains altsetting 1 so this host overlay does not silently
+change other controllers.
 
 The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresses
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream

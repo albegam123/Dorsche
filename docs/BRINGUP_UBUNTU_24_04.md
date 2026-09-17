@@ -168,3 +168,26 @@ new kernel message or oops. An eight-second A2DP/SBC regression then sent
 and likewise added no kernel message. The user's original kernel source tree
 was never modified. RF-loss recovery and long-duration soak remain separate
 tests.
+
+### Realtek RTL8761BU WBS result
+
+A later run replaced the CSR controller with Realtek RTL8761BU `2b89:8761`
+(firmware `0x09a98a6b`). A generic altsetting-1/24-byte configuration carried
+data but marked all 1,064 decoded mSBC frames lost, yielding all-zero uplink
+PCM. Linux 6.18 sets `BTUSB_USE_ALT3_FOR_WBS` on Realtek devices. Matching that
+policy with altsetting 3 changed the controller's HCI SCO packet layout to 72
+bytes, so the final verified configuration is:
+
+```ini
+bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
+bluetooth.hfp.linux_hci_driver_msbc_altsetting=3
+bluetooth.hfp.linux_hci_driver_msbc_packet_size=72
+```
+
+An eight-second 440-Hz reference/downlink run then sent 256,000 bytes and
+captured 255,120 bytes of nonzero uplink PCM. Floss decoded 1,063 frames with a
+1.5052% packet-loss ratio and no `NO_DATA_RECEIVED`, `PARTIALLY_LOST`, or
+`POSSIBLY_INCOMPLETE` events in that run. A 12-second microphone loopback sent
+and captured 383,040 bytes (`RMS=170.8`, `peak=2549`) and stopped cleanly. The
+following CVSD regression captured 79,680 bytes (`RMS=1831.7`, `peak=29701`),
+and the A2DP/SBC regression sent 979,200 PCM bytes with listener status zero.

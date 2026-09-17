@@ -145,21 +145,34 @@ cargo run --bin floss_hfp_smoke -- \
   --address F0:BE:25:79:62:A4 --seconds 10 --codec msbc --loopback
 ```
 
-On the Linux 6.18 btusb driver-command path, CVSD uses USB altsetting 2 and
-transparent mSBC uses altsetting 1; both must return to altsetting 0 on stop.
-Controllers that expose 48-byte HCI SCO packets, such as the tested CSR
-`0a12:0001`, also need this controller-specific setting in
-`/var/lib/bluetooth/sysprops.conf`:
+On the Linux 6.18 btusb driver-command path, CVSD uses USB altsetting 2.
+Transparent mSBC defaults to altsetting 1, but its altsetting and HCI SCO packet
+size are a controller-specific pair; every path must return to altsetting 0 on
+stop. For example, the tested CSR `0a12:0001` uses altsetting 1 with 48-byte
+packets:
 
 ```ini
 [Sysprops]
 bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
+bluetooth.hfp.linux_hci_driver_msbc_altsetting=1
 bluetooth.hfp.linux_hci_driver_msbc_packet_size=48
 ```
 
-Do not apply the 48-byte override globally: the overlay accepts only the mSBC
-framer's supported 24/48/60/72-byte sizes and otherwise retains the upstream
-60-byte default. On Linux 6.18, btusb may log one `EMSGSIZE (90)` while changing
+The tested Realtek RTL8761BU `2b89:8761` follows Linux btusb's Realtek WBS
+selection and requires altsetting 3 with 72-byte packets. Altsetting 1 produced
+24-byte packets whose HCI status marked every decoded frame lost; changing only
+the altsetting caused Floss to reject the resulting 72-byte packets as a size
+mismatch. Use both values together:
+
+```ini
+bluetooth.hfp.linux_hci_driver_msbc_altsetting=3
+bluetooth.hfp.linux_hci_driver_msbc_packet_size=72
+```
+
+Do not apply either controller quirk globally. The overlay accepts only USB
+altsettings 1 through 6 and the mSBC framer's supported 24/48/60/72-byte sizes;
+invalid values retain safe defaults. On Linux 6.18, btusb may log one
+`EMSGSIZE (90)` while changing
 back to altsetting 0 because the driver does not cancel its SCO TX anchor before
 `usb_set_interface`; this occurs after the full-duplex stream has completed and
 is distinct from a packet-size mismatch or kernel oops.
