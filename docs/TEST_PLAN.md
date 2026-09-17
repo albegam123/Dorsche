@@ -49,8 +49,23 @@ exclusive-ownership, permissions, or daemon-startup issues—not audio issues.
    reconnect behavior.
 3. Exercise GATT discovery, MTU exchange, read/write, notifications, and a
    disconnect during outstanding I/O.
-4. Run 100 connect/disconnect cycles and a 30-minute continuous scan while
+4. Pair a BLE HID/HOGP mouse, require UUID `0x1812`, then verify that Floss HID
+   Host creates UHID-backed keyboard/mouse `eventN` nodes. Capture actual
+   `REL_X`, `REL_Y`, `REL_WHEEL`, `BTN_LEFT`, and `BTN_RIGHT` traffic. Repeat
+   after peripheral power-cycle, `btadapterd` restart, and controller hotplug.
+   If the peripheral drops its first post-pairing GATT discovery connection,
+   retry through Floss `FetchRemoteUuids`; do not implement HOGP in the test
+   harness or mistake a Logitech Unifying link for Classic HIDP.
+5. Run 100 connect/disconnect cycles and a 30-minute continuous scan while
    checking RSS and HCI command/event health.
+
+The repeatable HOGP entry point for an already bonded device is:
+
+```bash
+sudo scripts/floss/hid-smoke.sh \
+  --runtime /path/to/relocatable/floss-runtime \
+  --address XX:XX:XX:XX:XX:XX
+```
 
 ### P2: Classic audio boundary
 
