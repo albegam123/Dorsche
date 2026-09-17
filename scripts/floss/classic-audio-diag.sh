@@ -33,7 +33,7 @@ Options:
   --no-delayed         Skip the delayed full-duplex case
 
 Environment overrides:
-  DORSCHE_A2DP_SMOKE, DORSCHE_HFP_SMOKE, DORSCHE_QUIRK_RESOLVER
+  DORSCHE_A2DP_SMOKE, DORSCHE_HFP_SMOKE
 EOF
 }
 
@@ -108,12 +108,6 @@ else
   a2dp="${DORSCHE_A2DP_SMOKE:-$default_a2dp}"
   hfp="${DORSCHE_HFP_SMOKE:-$default_hfp}"
 fi
-if [[ -x /usr/libexec/bluetooth/dorsche-controller-quirks ]]; then
-  default_quirks=/usr/libexec/bluetooth/dorsche-controller-quirks
-else
-  default_quirks="$root/target/release/dorsche_controller_quirks"
-fi
-quirks="${DORSCHE_QUIRK_RESOLVER:-$default_quirks}"
 [[ -x "$a2dp" && -x "$hfp" ]] || {
   printf 'Missing smoke binary: a2dp=%s hfp=%s\n' "$a2dp" "$hfp" >&2
   exit 2
@@ -174,13 +168,9 @@ since_epoch="$(date +%s)"
   readlink -f "/sys/class/bluetooth/hci$hci/device" 2>/dev/null | sed 's/^/hci_sysfs=/'
 } > "$output/metadata.txt"
 
-if [[ -x "$quirks" ]]; then
-  if [[ -n "$loader" ]]; then
-    "$loader" --library-path "$libraries" "$quirks" --hci "$hci" \
-      > "$output/controller.txt" 2>&1 || true
-  else
-    "$quirks" --hci "$hci" > "$output/controller.txt" 2>&1 || true
-  fi
+device_path="$(readlink -f "/sys/class/bluetooth/hci$hci/device" 2>/dev/null || true)"
+if [[ -n "$device_path" ]] && command -v udevadm >/dev/null; then
+  udevadm info --query=property --path="$device_path" > "$output/controller.txt" 2>&1 || true
 fi
 if [[ -r /var/lib/bluetooth/sysprops.conf ]]; then
   cp /var/lib/bluetooth/sysprops.conf "$output/sysprops.conf"

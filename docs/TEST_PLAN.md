@@ -56,12 +56,11 @@ exclusive-ownership, permissions, or daemon-startup issues—not audio issues.
    initially forcing CVSD with `floss_hfp_smoke`. Require USB interface
    altsetting `0 -> 2 -> 0`, nonzero downlink/uplink byte counts, microphone
    RMS/peak, clean `StopScoCall` on every error path, and no btusb URB submission
-   failure during teardown. Then enable mSBC where supported and verify the
-   controller-specific `(altsetting, HCI packet size)` pair (for example
-   `(1, 48)` on the tested CSR or `(3, 72)` on the tested RTL8761BU), call-state
-   transitions, packet-status/PLC counters, and recovery after RF loss. Treat
-   the pair atomically: a packet-size mismatch must fail loudly rather than be
-   decoded as audio.
+   failure during teardown. Then enable mSBC where the kernel reports WBS and
+   verify call-state transitions, packet-status/PLC counters, and recovery
+   after RF loss. Capture the driver-selected altsetting and HCI SCO MTU as
+   evidence, but never provide either value as userspace controller policy. A
+   packet-size mismatch must fail loudly rather than be decoded as audio.
 4. Only after the existing UIPC ABI is stable, attach Dorsche's PipeWire graph.
 
 ### P3: AI audio and barge-in

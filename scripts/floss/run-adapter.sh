@@ -5,7 +5,6 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 state="${DORSCHE_FLOSS_STATE:-$root/.cache/floss}"
 hci="${1:-0}"
 binary="${DORSCHE_BTADAPTERD:-$state/output/release/btadapterd}"
-quirk_resolver="${DORSCHE_QUIRK_RESOLVER:-$root/target/release/dorsche_controller_quirks}"
 
 [[ "$hci" =~ ^[0-9]+$ ]] || {
   printf 'HCI index must be numeric.\n' >&2
@@ -22,22 +21,6 @@ quirk_resolver="${DORSCHE_QUIRK_RESOLVER:-$root/target/release/dorsche_controlle
 if pgrep -x bluetoothd >/dev/null; then
   printf 'bluetoothd is running and owns hci%s. Stop bluetooth.service first.\n' "$hci" >&2
   exit 3
-fi
-
-if [[ -x "$quirk_resolver" ]]; then
-  quirk_args=(--hci "$hci")
-  if [[ "${DORSCHE_AUTO_CONTROLLER_QUIRKS:-0}" == 1 ]]; then
-    quirk_args+=(--apply)
-    if [[ $EUID -eq 0 ]]; then
-      "$quirk_resolver" "${quirk_args[@]}"
-    else
-      sudo "$quirk_resolver" "${quirk_args[@]}"
-    fi
-  else
-    "$quirk_resolver" "${quirk_args[@]}"
-  fi
-else
-  printf 'Controller quirk resolver not built; continuing without detection.\n' >&2
 fi
 
 mkdir_audio=(install -d -m 0770 /var/run/bluetooth/audio)

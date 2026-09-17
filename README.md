@@ -79,7 +79,6 @@ src/topshim/frame.rs       fd/fence adoption and mapped frame lease
 src/topshim/actors.rs      four message-passing actors and priority tracks
 src/bin/floss_audio_smoke.rs  native zbus + Floss UIPC A2DP hardware smoke test
 src/bin/floss_hfp_smoke.rs    native zbus + full-duplex CVSD/SCO hardware smoke test
-src/bin/dorsche_controller_quirks.rs  USB HFP transport-pair resolver
 scripts/floss/classic-audio-diag.sh   repeatable Classic audio diagnostics/soak
 ```
 
@@ -161,11 +160,16 @@ cargo run --bin floss_hfp_smoke -- \
   --address F0:BE:25:79:62:A4 --seconds 10 --codec msbc --loopback
 ```
 
-On the Linux 6.18 btusb driver-command path, CVSD uses USB altsetting 2.
-Transparent mSBC defaults to altsetting 1, but its altsetting and HCI SCO packet
-size are a controller-specific pair; every path must return to altsetting 0 on
-stop. For example, the tested CSR `0a12:0001` uses altsetting 1 with 48-byte
-packets:
+The Bluetooth stack must not choose a USB alternate setting. HFP negotiates
+CVSD or transparent mSBC, then a codec-aware Linux driver notification lets
+`btusb_work()` select bandwidth from the active codec, USB descriptors,
+controller SCO MTU, and kernel-owned quirks. In particular, no Dorsche table
+maps USB VID:PID values to transport parameters.
+
+The current Linux 6.18 compatibility switch below predates that codec-aware
+interface. It directly selects a USB layout and is retained only as an
+explicit, default-off diagnostic escape hatch while bringing up the kernel
+interface; it is not production controller policy:
 
 ```ini
 [Sysprops]
@@ -174,35 +178,19 @@ bluetooth.hfp.linux_hci_driver_msbc_altsetting=1
 bluetooth.hfp.linux_hci_driver_msbc_packet_size=48
 ```
 
-The tested Realtek RTL8761BU `2b89:8761` follows Linux btusb's Realtek WBS
-selection and requires altsetting 3 with 72-byte packets. Altsetting 1 produced
-24-byte packets whose HCI status marked every decoded frame lost; changing only
-the altsetting caused Floss to reject the resulting 72-byte packets as a size
-mismatch. Use both values together:
+For example, one hardware investigation temporarily used:
 
 ```ini
 bluetooth.hfp.linux_hci_driver_msbc_altsetting=3
 bluetooth.hfp.linux_hci_driver_msbc_packet_size=72
 ```
 
-Do not apply either controller quirk globally. The overlay accepts only USB
-altsettings 1 through 6 and the mSBC framer's supported 24/48/60/72-byte sizes;
-invalid values retain safe defaults. On Linux 6.18, btusb may log one
+Do not install those values as controller detection or normal startup policy.
+On Linux 6.18, btusb may log one
 `EMSGSIZE (90)` while changing
 back to altsetting 0 because the driver does not cancel its SCO TX anchor before
 `usb_set_interface`; this occurs after the full-duplex stream has completed and
 is distinct from a packet-size mismatch or kernel oops.
-
-The installed `dorsche-controller-quirks` helper resolves these pairs from the
-physical `hciN` sysfs ancestry before `btadapterd` starts. It changes only the
-two mSBC transport keys for known VID:PID entries, preserves file ownership and
-mode with an atomic replacement, and is idempotent. It deliberately does not
-enable `bluetooth.hfp.linux_hci_driver_altsetting.enabled`; kernel-path opt-in
-remains an administrator decision. Dry-run it with:
-
-```bash
-target/release/dorsche_controller_quirks --hci 4
-```
 
 Run the complete Classic audio diagnostic once, or turn it into a soak with a
 larger cycle count:
@@ -215,7 +203,7 @@ sudo scripts/floss/classic-audio-diag.sh \
   --address F0:BE:25:79:62:A4 --hci 4 --cycles 100 --seconds 10 --no-delayed
 ```
 
-Every case is independently marked PASS/FAIL. Raw PCM, controller metadata,
+Every case is independently marked PASS/FAIL. Raw PCM, udev controller metadata,
 USB topology, sysprops, connected devices, packet-loss summaries and the daemon
 journal are retained under `out/classic-audio-*`. A D-Bus `Connect` return is
 not treated as success: the script waits for the headset to appear in

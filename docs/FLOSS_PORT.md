@@ -101,41 +101,30 @@ the unmodified D-Bus policy and systemd units under
 `.cache/floss/staging/bt` and applies the narrowly scoped patches recorded in
 `scripts/floss/patches/`. The first patch pins the Rust `cxx` crate to the same
 1.0.94 ABI as AOSP's `cxxbridge` generator and enables two dependency features
-normally supplied by ChromiumOS's vendored Rust graph. The second patch exposes
-Linux 6.18's upstream `HCI_DRV_PKT` transport through the existing host HCI user
-socket. On HFP SCO connect/disconnect it can send btusb's switch-altsetting
-driver command (opcode `0x0401`) instead of relying on the ChromeOS-private
-management opcode. The imported `third_party/floss` tree is never patched and
-remains verifiable byte-for-byte.
+normally supplied by ChromiumOS's vendored Rust graph. The second patch
+currently exposes Linux 6.18's upstream `HCI_DRV_PKT` transport through the
+existing host HCI user socket. Its direct switch-altsetting command is a
+temporary bring-up mechanism, not the target architecture. The target command
+reports only SCO connection state and codec; `btusb` owns descriptor, MTU,
+bandwidth, and quirk policy. The imported `third_party/floss` tree is never
+patched and remains verifiable byte-for-byte.
 
-The HCI driver command path defaults off. Enable it only on Linux 6.18 or newer
-after confirming the controller uses upstream `HCI_DRV_PKT`:
+The legacy direct-switch path defaults off. Enable it only for controlled Linux
+6.18 diagnostics, never for automatic controller selection:
 
 ```ini
 bluetooth.hfp.linux_hci_driver_altsetting.enabled=true
 ```
 
-That gate preserves the behavior of older kernels. CVSD selects USB
-altsetting 2. Transparent mSBC defaults to altsetting 1, while
-`bluetooth.hfp.linux_hci_driver_msbc_altsetting` selects a validated value from
-1 through 6 for controller-specific USB bandwidth layouts. The corresponding
-`bluetooth.hfp.linux_hci_driver_msbc_packet_size` must match the HCI SCO packet
-size exposed by that layout. Disconnect restores altsetting 0. The command must
-be sent by Floss because its
+That gate preserves the behavior of older kernels. Any configured altsetting
+and packet size are diagnostic assertions only. They must not be inferred from
+VID:PID or installed by the runtime. The command must be sent by Floss because its
 `HCI_CHANNEL_USER` socket exclusively owns the controller; a sidecar process
 or external kernel module would violate that ownership model.
 
-Linux 6.18 marks Realtek btusb devices with `BTUSB_USE_ALT3_FOR_WBS`. The tested
-RTL8761BU `2b89:8761` therefore uses mSBC altsetting 3 and 72-byte packets. The
-generic default remains altsetting 1 so this host overlay does not silently
-change other controllers.
-
-Production startup runs `dorsche-controller-quirks` as a narrowly privileged
-systemd `ExecStartPre`. The resolver walks from `/sys/class/bluetooth/hciN/device`
-to the owning USB device, selects a reviewed VID:PID entry, and atomically
-updates the altsetting/packet-size pair before Floss reads sysprops. Unknown and
-non-USB transports are left untouched and do not block startup. The resolver
-never enables the Linux HCI driver-command gate by itself.
+Linux 6.18 already marks supported devices with kernel-owned WBS and transport
+flags. Those flags and USB descriptors belong inside `btusb`; they are not an
+API for Floss or Dorsche.
 
 The wrapper also locates Ubuntu's versioned `libclang` for bindgen and suppresses
 only Clang 18's newly split `vla-cxx-extension` diagnostic. All other upstream
@@ -153,8 +142,8 @@ only the Android-specific `LE_GET_VENDOR_CAPABILITIES` probe; standard USB HCI
 controllers are not required to implement that vendor opcode. Existing host
 configuration is never overwritten.
 
-The installer also builds/installs the resolver and Classic audio smoke tools,
-then adds a systemd drop-in making `bluetooth-audio` a
+The installer also builds/installs the Classic audio smoke tools, then adds a
+systemd drop-in making `bluetooth-audio` a
 supplementary group of `btadapterd`. This lets the daemon assign its A2DP/SCO
 UIPC sockets to the intended group without broadening its upstream capability
 bounding set. Rust audio clients use Tokio-native `zbus` for control methods and

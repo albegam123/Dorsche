@@ -4,7 +4,6 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 state="${DORSCHE_FLOSS_STATE:-$root/.cache/floss}"
 package="$root/third_party/floss/system/build/dpkg/floss/package"
-quirk_resolver="$root/target/release/dorsche_controller_quirks"
 audio_smoke="$root/target/release/floss_audio_smoke"
 hfp_smoke="$root/target/release/floss_hfp_smoke"
 
@@ -19,11 +18,6 @@ for binary in btadapterd btmanagerd btclient; do
     exit 2
   }
 done
-[[ -x "$quirk_resolver" ]] || {
-  printf 'Missing Dorsche controller resolver: %s\n' "$quirk_resolver" >&2
-  printf 'Build it with: cargo build --release --bin dorsche_controller_quirks\n' >&2
-  exit 2
-}
 for binary in "$audio_smoke" "$hfp_smoke"; do
   [[ -x "$binary" ]] || {
     printf 'Missing Dorsche smoke binary: %s\n' "$binary" >&2
@@ -41,8 +35,6 @@ install -D -m 0755 "$state/output/release/btmanagerd" \
   /usr/libexec/bluetooth/btmanagerd
 install -D -m 0755 "$state/output/release/btclient" \
   /usr/local/bin/btclient
-install -D -m 0755 "$quirk_resolver" \
-  /usr/libexec/bluetooth/dorsche-controller-quirks
 install -D -m 0755 "$audio_smoke" \
   /usr/libexec/bluetooth/floss_audio_smoke
 install -D -m 0755 "$hfp_smoke" \
@@ -68,4 +60,4 @@ install -d -m 0770 -g bluetooth-audio /var/run/bluetooth/audio
 systemctl daemon-reload
 systemctl reload dbus.service
 
-printf 'Installed Floss runtime plus Dorsche controller/audio diagnostics. Services were not enabled or started.\n'
+printf 'Installed Floss runtime plus Dorsche audio diagnostics. Services were not enabled or started.\n'
